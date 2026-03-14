@@ -1,0 +1,62 @@
+###############################################################################
+# WEBCCOIN MINER - DEPENDENCIES
+# Combined requirements for both AVR Miner and PC Miner
+# Version 1.0
+###############################################################################
+
+# -------------------- BẮT BUỘC (REQUIRED) --------------------
+# Thư viện HTTP requests - dùng để gọi API
+requests>=2.28.0
+
+# Thư viện tạo màu sắc console đẹp
+colorama>=0.4.6
+
+# Thư viện giao tiếp Serial với Arduino (cho AVR Miner)
+pyserial>=3.5
+
+# -------------------- TÙY CHỌN (OPTIONAL) --------------------
+# Nhập mật khẩu ẩn (cho PC Miner)
+getpass4>=1.0.1
+
+# Giám sát CPU/RAM (cho PC Miner)
+psutil>=5.9.0
+
+# Lấy thông tin CPU chi tiết (cho PC Miner)
+py-cpuinfo>=9.0.0
+
+# Discord Rich Presence (nếu muốn thêm sau)
+pypresence>=4.3.0
+
+# -------------------- PHỤ THUỘC GIÁN TIẾP --------------------
+certifi>=2023.0.0
+urllib3>=1.26.0
+idna>=3.4
+charset-normalizer>=3.0.0
+
+# -------------------- WINDOWS-SPECIFIC --------------------
+pywin32>=305; sys_platform == 'win32'
+wmi>=1.5.1; sys_platform == 'win32'
+
+# -------------------- LINUX/RPi-SPECIFIC --------------------
+RPi.GPIO>=0.7.0; sys_platform == 'linux'
+
+###############################################################################
+# HƯỚNG DẪN CÀI ĐẶT
+###############################################################################
+#
+# 1. Cài đặt TẤT CẢ dependencies:
+#    pip install -r requirements.txt
+#
+# 2. Cài đặt NHANH (chỉ các gói bắt buộc):
+#    pip install requests colorama pyserial
+#
+# 3. Cài đặt trong môi trường ảo (khuyến nghị):
+#    python -m venv webcoin-env
+#    source webcoin-env/bin/activate  # Linux/Mac
+#    webcoin-env\Scripts\activate     # Windows
+#    pip install -r requirements.txt
+#
+# 4. Kiểm tra cài đặt:
+#    python -c "import requests, colorama, serial; print('✅ OK')"
+#
+###############################################################################
