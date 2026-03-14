@@ -1,0 +1,1378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebCoin - The Lightweight Multi-Platform Blockchain</title>
+    
+    <!-- Fonts & Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        /* Particles Background */
+        #particles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Navigation */
+        .navbar {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 1rem 0;
+            position: fixed;
+            width: 100%;
+            top: 0;
+            z-index: 1000;
+            box-shadow: 0 2px 20px rgba(0,0,0,0.1);
+        }
+
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: #667eea;
+        }
+
+        .logo i {
+            font-size: 2rem;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 30px;
+            align-items: center;
+        }
+
+        .nav-links a {
+            text-decoration: none;
+            color: #333;
+            font-weight: 500;
+            transition: color 0.3s;
+        }
+
+        .nav-links a:hover {
+            color: #667eea;
+        }
+
+        .btn {
+            padding: 10px 25px;
+            border-radius: 50px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.3s;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        .btn-outline {
+            border: 2px solid #667eea;
+            color: #667eea;
+            background: transparent;
+        }
+
+        .btn-outline:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-large {
+            padding: 15px 40px;
+            font-size: 1.1rem;
+        }
+
+        /* Hero Section */
+        .hero {
+            padding: 160px 0 80px;
+            text-align: center;
+            color: white;
+        }
+
+        .hero h1 {
+            font-size: 4rem;
+            font-weight: 800;
+            margin-bottom: 20px;
+            line-height: 1.2;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+
+        .hero .highlight {
+            background: linear-gradient(135deg, #fff 0%, #e0e0e0 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero p {
+            font-size: 1.3rem;
+            max-width: 800px;
+            margin: 0 auto 40px;
+            opacity: 0.95;
+        }
+
+        .hero-buttons {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin-bottom: 60px;
+        }
+
+        .hero-buttons .btn {
+            background: white;
+            color: #667eea;
+        }
+
+        .hero-buttons .btn-outline-light {
+            background: transparent;
+            border: 2px solid white;
+            color: white;
+        }
+
+        .hero-buttons .btn-outline-light:hover {
+            background: white;
+            color: #667eea;
+        }
+
+        /* Stats Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 30px;
+            margin-top: 60px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 30px 20px;
+            border-radius: 20px;
+            text-align: center;
+            transition: transform 0.3s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-10px);
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .stat-card i {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+            color: white;
+        }
+
+        .stat-card .stat-value {
+            font-size: 2rem;
+            font-weight: 800;
+            color: white;
+            margin-bottom: 5px;
+        }
+
+        .stat-card .stat-label {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 0.95rem;
+        }
+
+        /* Features Section */
+        .section {
+            padding: 80px 0;
+            background: white;
+        }
+
+        .section-title {
+            text-align: center;
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .section-subtitle {
+            text-align: center;
+            font-size: 1.2rem;
+            color: #666;
+            max-width: 700px;
+            margin: 0 auto 60px;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 30px;
+        }
+
+        .feature-card {
+            background: #f8f9fa;
+            padding: 40px 30px;
+            border-radius: 20px;
+            text-align: center;
+            transition: all 0.3s;
+            border: 1px solid #e9ecef;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            border-color: #667eea;
+        }
+
+        .feature-icon {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 25px;
+        }
+
+        .feature-icon i {
+            font-size: 2rem;
+            color: white;
+        }
+
+        .feature-card h3 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .feature-card p {
+            color: #666;
+            margin-bottom: 20px;
+        }
+
+        .feature-tag {
+            display: inline-block;
+            padding: 5px 15px;
+            background: #e9ecef;
+            border-radius: 50px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        /* Platform Cards */
+        .platforms-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 25px;
+        }
+
+        .platform-card {
+            background: white;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            transition: transform 0.3s;
+            border: 1px solid #e9ecef;
+        }
+
+        .platform-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+        }
+
+        .platform-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .platform-header i {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .platform-header h4 {
+            font-size: 1.3rem;
+            font-weight: 700;
+        }
+
+        .platform-body {
+            padding: 25px 20px;
+        }
+
+        .platform-body ul {
+            list-style: none;
+            margin-bottom: 20px;
+        }
+
+        .platform-body ul li {
+            margin-bottom: 10px;
+            color: #666;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .platform-body ul li i {
+            color: #28a745;
+            font-size: 0.9rem;
+        }
+
+        .platform-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            background: #e9ecef;
+            border-radius: 50px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #667eea;
+            margin-top: 15px;
+        }
+
+        /* How It Works */
+        .steps-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 30px;
+            margin-top: 40px;
+        }
+
+        .step-card {
+            text-align: center;
+            position: relative;
+        }
+
+        .step-number {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 25px;
+            font-size: 1.8rem;
+            font-weight: 800;
+            color: white;
+            position: relative;
+            z-index: 2;
+        }
+
+        .step-card h3 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .step-card p {
+            color: #666;
+        }
+
+        /* Code Block */
+        .code-block {
+            background: #1e1e1e;
+            border-radius: 15px;
+            padding: 30px;
+            margin: 40px 0;
+            position: relative;
+        }
+
+        .code-block pre {
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            overflow-x: auto;
+        }
+
+        .code-block .code-title {
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: #667eea;
+            color: white;
+            padding: 5px 20px;
+            border-radius: 50px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .code-block .copy-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255,255,255,0.1);
+            border: none;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background 0.3s;
+        }
+
+        .code-block .copy-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+
+        /* Tokenomics */
+        .tokenomics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 50px;
+            align-items: center;
+        }
+
+        .tokenomics-chart {
+            background: #f8f9fa;
+            padding: 40px;
+            border-radius: 20px;
+        }
+
+        .chart-item {
+            margin-bottom: 20px;
+        }
+
+        .chart-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+
+        .chart-bar {
+            height: 30px;
+            background: #e9ecef;
+            border-radius: 15px;
+            overflow: hidden;
+        }
+
+        .chart-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 15px;
+            width: 0%;
+            transition: width 1s;
+        }
+
+        .tokenomics-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .token-stat {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+        }
+
+        .token-stat .value {
+            font-size: 2rem;
+            font-weight: 800;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .token-stat .label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        /* FAQ */
+        .faq-grid {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .faq-item {
+            background: #f8f9fa;
+            border-radius: 15px;
+            margin-bottom: 15px;
+            overflow: hidden;
+        }
+
+        .faq-question {
+            padding: 20px 25px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .faq-question i {
+            transition: transform 0.3s;
+        }
+
+        .faq-item.active .faq-question i {
+            transform: rotate(180deg);
+        }
+
+        .faq-answer {
+            padding: 0 25px;
+            max-height: 0;
+            overflow: hidden;
+            transition: all 0.3s;
+            color: #666;
+        }
+
+        .faq-item.active .faq-answer {
+            padding: 0 25px 25px;
+            max-height: 200px;
+        }
+
+        /* CTA Section */
+        .cta-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 80px 0;
+            text-align: center;
+            color: white;
+        }
+
+        .cta-section h2 {
+            font-size: 2.8rem;
+            font-weight: 800;
+            margin-bottom: 20px;
+        }
+
+        .cta-section p {
+            font-size: 1.2rem;
+            max-width: 600px;
+            margin: 0 auto 40px;
+            opacity: 0.95;
+        }
+
+        .cta-buttons {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+        }
+
+        .cta-buttons .btn {
+            background: white;
+            color: #667eea;
+            font-size: 1.1rem;
+            padding: 15px 40px;
+        }
+
+        .cta-buttons .btn-outline-light {
+            background: transparent;
+            border: 2px solid white;
+            color: white;
+        }
+
+        .cta-buttons .btn-outline-light:hover {
+            background: white;
+            color: #667eea;
+        }
+
+        /* Footer */
+        .footer {
+            background: #1a1a2e;
+            color: white;
+            padding: 60px 0 30px;
+        }
+
+        .footer-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 1.5fr;
+            gap: 50px;
+            margin-bottom: 50px;
+        }
+
+        .footer-about h3 {
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .footer-about p {
+            color: #b8b8b8;
+            line-height: 1.8;
+            margin-bottom: 20px;
+        }
+
+        .social-links {
+            display: flex;
+            gap: 15px;
+        }
+
+        .social-links a {
+            width: 40px;
+            height: 40px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            text-decoration: none;
+            transition: all 0.3s;
+        }
+
+        .social-links a:hover {
+            background: #667eea;
+            transform: translateY(-3px);
+        }
+
+        .footer-links h4 {
+            font-size: 1.2rem;
+            margin-bottom: 20px;
+            color: white;
+        }
+
+        .footer-links ul {
+            list-style: none;
+        }
+
+        .footer-links ul li {
+            margin-bottom: 10px;
+        }
+
+        .footer-links ul li a {
+            color: #b8b8b8;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+
+        .footer-links ul li a:hover {
+            color: #667eea;
+        }
+
+        .footer-newsletter p {
+            color: #b8b8b8;
+            margin-bottom: 20px;
+        }
+
+        .newsletter-form {
+            display: flex;
+            gap: 10px;
+        }
+
+        .newsletter-form input {
+            flex: 1;
+            padding: 12px 15px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.05);
+            border-radius: 50px;
+            color: white;
+            font-size: 0.95rem;
+        }
+
+        .newsletter-form input::placeholder {
+            color: #888;
+        }
+
+        .newsletter-form button {
+            width: 50px;
+            height: 50px;
+            border: none;
+            background: #667eea;
+            color: white;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .newsletter-form button:hover {
+            background: #764ba2;
+            transform: translateX(3px);
+        }
+
+        .footer-bottom {
+            text-align: center;
+            padding-top: 30px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            color: #888;
+            font-size: 0.95rem;
+        }
+
+        .footer-bottom a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        /* Animations */
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+            100% { transform: translateY(0px); }
+        }
+
+        .float {
+            animation: float 3s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
+        .pulse {
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .stats-grid,
+            .features-grid,
+            .platforms-grid,
+            .steps-grid,
+            .footer-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .nav-links {
+                display: none;
+            }
+
+            .hero h1 {
+                font-size: 2.8rem;
+            }
+
+            .hero-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .stats-grid,
+            .features-grid,
+            .platforms-grid,
+            .steps-grid,
+            .footer-grid,
+            .tokenomics-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .cta-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .cta-buttons .btn {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Particles Background -->
+    <div id="particles"></div>
+
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="logo">
+                <i class="fas fa-cube"></i>
+                <span>WebCoin</span>
+            </div>
+            <div class="nav-links">
+                <a href="#features">Features</a>
+                <a href="#platforms">Platforms</a>
+                <a href="#how-it-works">How It Works</a>
+                <a href="#tokenomics">Tokenomics</a>
+                <a href="#faq">FAQ</a>
+                <a href="https://webcoin-1n9d.onrender.com" class="btn btn-primary" target="_blank">
+                    <i class="fas fa-external-link-alt"></i> Launch App
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <h1>
+                <span class="highlight">WebCoin</span><br>
+                The Lightweight Multi-Platform Blockchain
+            </h1>
+            <p>Mine WebCoin on any device - from Arduino to Web Browser. A complete blockchain ecosystem designed for learning and experimentation.</p>
+            
+            <div class="hero-buttons">
+                <a href="https://webcoin-1n9d.onrender.com" class="btn btn-large" target="_blank">
+                    <i class="fas fa-rocket"></i> Launch Demo
+                </a>
+                <a href="#features" class="btn btn-large btn-outline-light">
+                    <i class="fas fa-chevron-down"></i> Learn More
+                </a>
+            </div>
+
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="stat-card float">
+                    <i class="fas fa-microchip"></i>
+                    <div class="stat-value" id="stat-boards">5+</div>
+                    <div class="stat-label">Supported Boards</div>
+                </div>
+                <div class="stat-card float" style="animation-delay: 0.2s">
+                    <i class="fas fa-code-branch"></i>
+                    <div class="stat-value" id="stat-platforms">4</div>
+                    <div class="stat-label">Mining Platforms</div>
+                </div>
+                <div class="stat-card float" style="animation-delay: 0.4s">
+                    <i class="fas fa-bolt"></i>
+                    <div class="stat-value" id="stat-speed">5-10</div>
+                    <div class="stat-label">Hash Rate (H/s)</div>
+                </div>
+                <div class="stat-card float" style="animation-delay: 0.6s">
+                    <i class="fas fa-gem"></i>
+                    <div class="stat-value" id="stat-reward">10-200</div>
+                    <div class="stat-label">Block Reward</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="section">
+        <div class="container">
+            <h2 class="section-title">Why Choose WebCoin?</h2>
+            <p class="section-subtitle">A complete blockchain ecosystem with unique features for everyone</p>
+
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-microchip"></i>
+                    </div>
+                    <h3>Arduino Mining</h3>
+                    <p>Mine WebCoin on Arduino Uno, Nano, Mega, and more. SHA-1 algorithm optimized for AVR microcontrollers.</p>
+                    <span class="feature-tag">2-10 H/s</span>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-laptop-code"></i>
+                    </div>
+                    <h3>PC Mining</h3>
+                    <p>Multi-threaded CPU miner with interactive setup. Perfect for learning blockchain mining on your computer.</p>
+                    <span class="feature-tag">Python</span>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-globe"></i>
+                    </div>
+                    <h3>Web Mining</h3>
+                    <p>Mine directly in your browser! Real-time difficulty slider and live statistics.</p>
+                    <span class="feature-tag">JavaScript</span>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-terminal"></i>
+                    </div>
+                    <h3>Terminal Mining</h3>
+                    <p>Node.js command-line miner for servers and advanced users.</p>
+                    <span class="feature-tag">Node.js</span>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <h3>Secure by Design</h3>
+                    <p>secp256k1 signatures, AES-256 encrypted private keys, JWT authentication.</p>
+                    <span class="feature-tag">Military Grade</span>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <h3>Dynamic Rewards</h3>
+                    <p>Mining rewards adjust with difficulty. Higher difficulty = higher rewards (10-200 WebCoin).</p>
+                    <span class="feature-tag">Fair Mining</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Platforms Section -->
+    <section id="platforms" class="section" style="background: #f8f9fa;">
+        <div class="container">
+            <h2 class="section-title">Multi-Platform Mining</h2>
+            <p class="section-subtitle">Choose your platform and start mining today</p>
+
+            <div class="platforms-grid">
+                <div class="platform-card">
+                    <div class="platform-header">
+                        <i class="fas fa-microchip"></i>
+                        <h4>Arduino</h4>
+                    </div>
+                    <div class="platform-body">
+                        <ul>
+                            <li><i class="fas fa-check"></i> Uno / Nano / Mega</li>
+                            <li><i class="fas fa-check"></i> SHA-1 optimized</li>
+                            <li><i class="fas fa-check"></i> 2-10 H/s</li>
+                            <li><i class="fas fa-check"></i> LED status</li>
+                        </ul>
+                        <span class="platform-badge">C++</span>
+                    </div>
+                </div>
+
+                <div class="platform-card">
+                    <div class="platform-header">
+                        <i class="fas fa-laptop"></i>
+                        <h4>PC</h4>
+                    </div>
+                    <div class="platform-body">
+                        <ul>
+                            <li><i class="fas fa-check"></i> Multi-threaded CPU</li>
+                            <li><i class="fas fa-check"></i> Interactive setup</li>
+                            <li><i class="fas fa-check"></i> Real-time stats</li>
+                            <li><i class="fas fa-check"></i> Cross-platform</li>
+                        </ul>
+                        <span class="platform-badge">Python</span>
+                    </div>
+                </div>
+
+                <div class="platform-card">
+                    <div class="platform-header">
+                        <i class="fas fa-globe"></i>
+                        <h4>Web</h4>
+                    </div>
+                    <div class="platform-body">
+                        <ul>
+                            <li><i class="fas fa-check"></i> Browser-based</li>
+                            <li><i class="fas fa-check"></i> Difficulty slider</li>
+                            <li><i class="fas fa-check"></i> Live updates</li>
+                            <li><i class="fas fa-check"></i> No installation</li>
+                        </ul>
+                        <span class="platform-badge">JavaScript</span>
+                    </div>
+                </div>
+
+                <div class="platform-card">
+                    <div class="platform-header">
+                        <i class="fas fa-terminal"></i>
+                        <h4>Terminal</h4>
+                    </div>
+                    <div class="platform-body">
+                        <ul>
+                            <li><i class="fas fa-check"></i> Command-line</li>
+                            <li><i class="fas fa-check"></i> Server ready</li>
+                            <li><i class="fas fa-check"></i> Auto-mining</li>
+                            <li><i class="fas fa-check"></i> Lightweight</li>
+                        </ul>
+                        <span class="platform-badge">Node.js</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works -->
+    <section id="how-it-works" class="section">
+        <div class="container">
+            <h2 class="section-title">How WebCoin Works</h2>
+            <p class="section-subtitle">Simple, transparent, and educational blockchain mechanics</p>
+
+            <div class="steps-grid">
+                <div class="step-card">
+                    <div class="step-number">1</div>
+                    <h3>Create Wallet</h3>
+                    <p>Generate a secure wallet with secp256k1 key pair. Your private key is encrypted with AES-256.</p>
+                </div>
+
+                <div class="step-card">
+                    <div class="step-number">2</div>
+                    <h3>Get Mining Job</h3>
+                    <p>Connect to WebCoin server and receive a mining job with current block height and difficulty.</p>
+                </div>
+
+                <div class="step-card">
+                    <div class="step-number">3</div>
+                    <h3>Mine the Block</h3>
+                    <p>Find a nonce that produces a SHA-1 hash with required leading zeros. Higher difficulty = more zeros.</p>
+                </div>
+            </div>
+
+            <!-- Code Example -->
+            <div class="code-block">
+                <span class="code-title">SHA-1 Mining Algorithm</span>
+                <button class="copy-btn" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copy</button>
+                <pre>bool checkDifficulty(uint8_t* hash, uint32_t diff) {
+    for (uint32_t i = 0; i < diff; i++) {
+        if (hash[i] != 0) return false;
+    }
+    return true;
+}
+
+// Block structure (52 bytes):
+// [height:4B][prev_hash:20B][timestamp:4B][zero_hash:20B][nonce:4B]
+// Hash must start with 'diff' number of zero bytes</pre>
+            </div>
+        </div>
+    </section>
+
+    <!-- Tokenomics -->
+    <section id="tokenomics" class="section" style="background: #f8f9fa;">
+        <div class="container">
+            <h2 class="section-title">Tokenomics</h2>
+            <p class="section-subtitle">Fair and transparent distribution</p>
+
+            <div class="tokenomics-grid">
+                <div class="tokenomics-chart">
+                    <div class="chart-item">
+                        <div class="chart-label">
+                            <span>Mining Rewards</span>
+                            <span>70%</span>
+                        </div>
+                        <div class="chart-bar">
+                            <div class="chart-fill" style="width: 70%"></div>
+                        </div>
+                    </div>
+                    <div class="chart-item">
+                        <div class="chart-label">
+                            <span>Community & Ecosystem</span>
+                            <span>15%</span>
+                        </div>
+                        <div class="chart-bar">
+                            <div class="chart-fill" style="width: 15%"></div>
+                        </div>
+                    </div>
+                    <div class="chart-item">
+                        <div class="chart-label">
+                            <span>Development Fund</span>
+                            <span>10%</span>
+                        </div>
+                        <div class="chart-bar">
+                            <div class="chart-fill" style="width: 10%"></div>
+                        </div>
+                    </div>
+                    <div class="chart-item">
+                        <div class="chart-label">
+                            <span>Marketing & Partnerships</span>
+                            <span>5%</span>
+                        </div>
+                        <div class="chart-bar">
+                            <div class="chart-fill" style="width: 5%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tokenomics-stats">
+                    <div class="token-stat">
+                        <div class="value">21M</div>
+                        <div class="label">Max Supply</div>
+                    </div>
+                    <div class="token-stat">
+                        <div class="value">10-200</div>
+                        <div class="label">Block Reward</div>
+                    </div>
+                    <div class="token-stat">
+                        <div class="value">60s</div>
+                        <div class="label">Block Time</div>
+                    </div>
+                    <div class="token-stat">
+                        <div class="value">3-10</div>
+                        <div class="label">Difficulty Range</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ -->
+    <section id="faq" class="section">
+        <div class="container">
+            <h2 class="section-title">Frequently Asked Questions</h2>
+            <p class="section-subtitle">Everything you need to know about WebCoin</p>
+
+            <div class="faq-grid">
+                <div class="faq-item">
+                    <div class="faq-question" onclick="toggleFaq(this)">
+                        <span>What is WebCoin?</span>
+                        <i class="fas fa-chevron-down"></i>
+                    </div>
+                    <div class="faq-answer">
+                        WebCoin is a lightweight blockchain system designed for learning and experimentation. It features multi-platform mining (Arduino, PC, Web, Terminal), secp256k1 cryptography, and a complete web interface for wallet management.
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question" onclick="toggleFaq(this)">
+                        <span>How do I start mining?</span>
+                        <i class="fas fa-chevron-down"></i>
+                    </div>
+                    <div class="faq-answer">
+                        Choose your platform:
+                        • Web: Visit https://webcoin-1n9d.onrender.com, create wallet, go to Mine tab
+                        • Arduino: Upload miner.ino, run python AVR_Miner.py
+                        • PC: Run python PC_Miner.py and follow interactive setup
+                        • Terminal: node src/miner.js <wallet> <private_key>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question" onclick="toggleFaq(this)">
+                        <span>What mining algorithm does WebCoin use?</span>
+                        <i class="fas fa-chevron-down"></i>
+                    </div>
+                    <div class="faq-answer">
+                        WebCoin uses SHA-1 for Proof-of-Work. Blocks are hashed with SHA-1, and the hash must start with 'difficulty' number of zero bytes. Transactions are signed with secp256k1 (same as Bitcoin).
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question" onclick="toggleFaq(this)">
+                        <span>Can I mine with Arduino?</span>
+                        <i class="fas fa-chevron-down"></i>
+                    </div>
+                    <div class="faq-answer">
+                        Yes! WebCoin supports Arduino Uno, Nano, Mega, and compatible boards. The SHA-1 algorithm is optimized for AVR microcontrollers. Hash rates range from 2-10 H/s depending on your board.
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question" onclick="toggleFaq(this)">
+                        <span>How are mining rewards calculated?</span>
+                        <i class="fas fa-chevron-down"></i>
+                    </div>
+                    <div class="faq-answer">
+                        Rewards are dynamic: reward = min_reward + (difficulty * (max_reward - min_reward) / 10). With min_reward=10 and max_reward=200, higher difficulty = higher rewards. This encourages mining when the network is more secure.
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-question" onclick="toggleFaq(this)">
+                        <span>Is WebCoin secure?</span>
+                        <i class="fas fa-chevron-down"></i>
+                    </div>
+                    <div class="faq-answer">
+                        Yes! WebCoin implements industry-standard security: secp256k1 for digital signatures, AES-256-CBC for private key encryption, bcrypt for password hashing, JWT for authentication, and Helmet/CORS/rate limiting for API protection.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta-section">
+        <div class="container">
+            <h2>Ready to Start Mining?</h2>
+            <p>Join the WebCoin community today and start mining on your favorite platform</p>
+            <div class="cta-buttons">
+                <a href="https://webcoin-1n9d.onrender.com" class="btn btn-large" target="_blank">
+                    <i class="fas fa-rocket"></i> Launch Web App
+                </a>
+                <a href="https://github.com/nam348tnh3gp/web-coin" class="btn btn-large btn-outline-light" target="_blank">
+                    <i class="fab fa-github"></i> GitHub Repo
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-grid">
+                <div class="footer-about">
+                    <h3><i class="fas fa-cube"></i> WebCoin</h3>
+                    <p>The lightweight multi-platform blockchain system designed for learning and experimentation. Mine on Arduino, PC, Web, or Terminal.</p>
+                    <div class="social-links">
+                        <a href="#"><i class="fab fa-github"></i></a>
+                        <a href="#"><i class="fab fa-discord"></i></a>
+                        <a href="#"><i class="fab fa-twitter"></i></a>
+                        <a href="#"><i class="fab fa-telegram"></i></a>
+                    </div>
+                </div>
+
+                <div class="footer-links">
+                    <h4>Platforms</h4>
+                    <ul>
+                        <li><a href="#">Arduino Miner</a></li>
+                        <li><a href="#">PC Miner</a></li>
+                        <li><a href="#">Web Miner</a></li>
+                        <li><a href="#">Terminal Miner</a></li>
+                    </ul>
+                </div>
+
+                <div class="footer-links">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="#">Documentation</a></li>
+                        <li><a href="#">API Reference</a></li>
+                        <li><a href="#">Whitepaper</a></li>
+                        <li><a href="#">GitHub</a></li>
+                    </ul>
+                </div>
+
+                <div class="footer-newsletter">
+                    <h4>Stay Updated</h4>
+                    <p>Subscribe to receive updates about WebCoin</p>
+                    <form class="newsletter-form" onsubmit="event.preventDefault(); alert('Newsletter feature coming soon!')">
+                        <input type="email" placeholder="Your email" required>
+                        <button type="submit"><i class="fas fa-arrow-right"></i></button>
+                    </form>
+                </div>
+            </div>
+
+            <div class="footer-bottom">
+                <p>© 2026 WebCoin. All rights reserved. | 
+                   <a href="#">Privacy Policy</a> | 
+                   <a href="#">Terms of Service</a> | 
+                   <a href="https://webcoin-1n9d.onrender.com" target="_blank">Live Demo</a>
+                </p>
+                <p style="margin-top: 10px; font-size: 0.85rem;">
+                    Made with ⚡ by the WebCoin Team
+                </p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Particles Script -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/particles.js/2.0.0/particles.min.js"></script>
+    <script>
+        // Initialize particles
+        particlesJS('particles', {
+            particles: {
+                number: { value: 80, density: { enable: true, value_area: 800 } },
+                color: { value: '#ffffff' },
+                shape: { type: 'circle' },
+                opacity: { value: 0.5, random: false },
+                size: { value: 3, random: true },
+                line_linked: { enable: true, distance: 150, color: '#ffffff', opacity: 0.4, width: 1 },
+                move: { enable: true, speed: 2, direction: 'none', random: false, straight: false, out_mode: 'out', bounce: false }
+            },
+            interactivity: {
+                detect_on: 'canvas',
+                events: { onhover: { enable: true, mode: 'repulse' }, onclick: { enable: true, mode: 'push' }, resize: true },
+                modes: { repulse: { distance: 100, duration: 0.4 }, push: { particles_nb: 4 } }
+            },
+            retina_detect: true
+        });
+
+        // FAQ Toggle
+        function toggleFaq(element) {
+            const faqItem = element.parentElement;
+            faqItem.classList.toggle('active');
+        }
+
+        // Copy Code
+        function copyCode(button) {
+            const codeBlock = button.parentElement.querySelector('pre');
+            const text = codeBlock.innerText;
+            
+            navigator.clipboard.writeText(text).then(() => {
+                button.innerHTML = '<i class="fas fa-check"></i> Copied!';
+                setTimeout(() => {
+                    button.innerHTML = '<i class="fas fa-copy"></i> Copy';
+                }, 2000);
+            });
+        }
+
+        // Animate stats on scroll
+        function animateStats() {
+            const stats = document.querySelectorAll('.stat-value');
+            stats.forEach(stat => {
+                const value = stat.innerText;
+                if (value.includes('+')) return;
+                
+                let start = 0;
+                let end = parseInt(value);
+                if (isNaN(end)) return;
+                
+                let duration = 2000;
+                let step = (end / duration) * 10;
+                
+                let current = start;
+                let timer = setInterval(() => {
+                    current += step;
+                    if (current >= end) {
+                        stat.innerText = end + (stat.innerText.includes('+') ? '+' : '');
+                        clearInterval(timer);
+                    } else {
+                        stat.innerText = Math.floor(current);
+                    }
+                }, 10);
+            });
+        }
+
+        // Run animation when page loads
+        window.addEventListener('load', animateStats);
+
+        // Smooth scroll for navigation
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        });
+
+        // Navbar background change on scroll
+        window.addEventListener('scroll', () => {
+            const navbar = document.querySelector('.navbar');
+            if (window.scrollY > 100) {
+                navbar.style.background = 'rgba(255, 255, 255, 0.98)';
+                navbar.style.boxShadow = '0 2px 20px rgba(0,0,0,0.15)';
+            } else {
+                navbar.style.background = 'rgba(255, 255, 255, 0.95)';
+                navbar.style.boxShadow = '0 2px 20px rgba(0,0,0,0.1)';
+            }
+        });
+    </script>
+</body>
+</html>
