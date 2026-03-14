@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebCoin - Bảo mật cao</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/elliptic/6.5.4/elliptic.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        h1 {
+            text-align: center;
+            color: #fff;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 25px;
+            font-size: 2.5em;
+        }
+        .tabs {
+            display: flex;
+            background: #f8f9fa;
+            border-bottom: 2px solid #dee2e6;
+            flex-wrap: wrap;
+        }
+        .tab {
+            flex: 1;
+            padding: 15px;
+            text-align: center;
+            cursor: pointer;
+            font-weight: 600;
+            color: #495057;
+            transition: all 0.3s;
+            border-bottom: 3px solid transparent;
+            min-width: 100px;
+        }
+        .tab:hover { background: #e9ecef; }
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+            background: white;
+        }
+        .tab-content {
+            display: none;
+            padding: 30px;
+            animation: fadeIn 0.5s;
+        }
+        .tab-content.active { display: block; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        h2 { color: #333; margin-bottom: 20px; }
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 25px;
+        }
+        .wallet-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .wallet-card {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        .wallet-card h3 { color: #667eea; margin-bottom: 15px; }
+        .form-group { margin-bottom: 15px; }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #495057;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: monospace;
+        }
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        textarea {
+            resize: none;
+            background: #f8f9fa;
+            word-break: break-all;
+        }
+        select {
+            background: white;
+            cursor: pointer;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        button.secondary { background: #6c757d; }
+        button.danger { background: #dc3545; }
+        button.warning { background: #ffc107; color: #212529; }
+        .result {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 8px;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .wallet-info {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        .balance {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #28a745;
+        }
+        #mining-log {
+            background: #1e1e1e;
+            color: #0f0;
+            padding: 15px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            border-radius: 8px;
+            margin-top: 20px;
+            white-space: pre-wrap;
+        }
+        pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            max-height: 400px;
+        }
+        .address-display {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            word-break: break-all;
+            margin: 10px 0;
+            border: 1px solid #ced4da;
+        }
+        
+        /* History styles */
+        .history-item {
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 10px;
+            transition: transform 0.2s;
+        }
+        .history-item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .history-item.send { border-left: 4px solid #dc3545; }
+        .history-item.receive { border-left: 4px solid #28a745; }
+        .history-item.mine { border-left: 4px solid #ffc107; }
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .history-type {
+            font-weight: bold;
+            padding: 3px 10px;
+            border-radius: 15px;
+            font-size: 0.85em;
+        }
+        .history-type.send { background: #f8d7da; color: #721c24; }
+        .history-type.receive { background: #d4edda; color: #155724; }
+        .history-type.mine { background: #fff3cd; color: #856404; }
+        .history-time {
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+        .history-address {
+            font-family: monospace;
+            background: #f8f9fa;
+            padding: 5px;
+            border-radius: 5px;
+            margin: 5px 0;
+            word-break: break-all;
+            font-size: 0.9em;
+        }
+        .history-amount {
+            font-size: 1.2em;
+            font-weight: bold;
+            margin: 5px 0;
+        }
+        .history-amount.send { color: #dc3545; }
+        .history-amount.receive, .history-amount.mine { color: #28a745; }
+        .history-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px dashed #dee2e6;
+            font-size: 0.9em;
+            color: #6c757d;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .history-block { font-family: monospace; }
+        .history-tx-hash {
+            font-family: monospace;
+            color: #007bff;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        .history-tx-hash:hover { color: #0056b3; }
+        .history-loading, .history-empty {
+            text-align: center;
+            padding: 50px;
+            color: #6c757d;
+        }
+        .history-empty { font-style: italic; }
+        
+        .button-container {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .flex-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .mt-10 { margin-top: 10px; }
+        .w-auto { width: auto; }
+        
+        @media (max-width: 768px) {
+            .tabs { flex-wrap: wrap; }
+            .tab { flex: auto; width: 50%; }
+            h1 { font-size: 1.8em; }
+            .button-container { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⛓️ WebCoin - Bảo mật tối cao</h1>
+
+        <div class="tabs">
+            <div class="tab active" data-tab="wallet">Ví</div>
+            <div class="tab" data-tab="send">Gửi</div>
+            <div class="tab" data-tab="history">Lịch sử</div>
+            <div class="tab" data-tab="mine">Đào</div>
+            <div class="tab" data-tab="blockchain">Blockchain</div>
+        </div>
+
+        <!-- Tab Ví -->
+        <div id="wallet" class="tab-content active">
+            <h2>Quản lý ví</h2>
+            <div class="info-box">
+                <strong>📘 Hướng dẫn:</strong> Đăng ký ví mới với mật khẩu. Địa chỉ ví sẽ có dạng <code>W_</code> + public key. Sau khi đăng nhập, bạn có thể xem đầy đủ địa chỉ ví bên dưới.
+            </div>
+
+            <div class="wallet-grid">
+                <div class="wallet-card">
+                    <h3>📝 Đăng ký</h3>
+                    <div class="form-group">
+                        <input type="password" id="reg-password" placeholder="Mật khẩu (≥6 ký tự)">
+                    </div>
+                    <button id="register-btn">Tạo ví mới</button>
+                    <div id="reg-result" class="result"></div>
+                </div>
+
+                <div class="wallet-card">
+                    <h3>🔐 Đăng nhập</h3>
+                    <div class="form-group">
+                        <input type="text" id="login-address" placeholder="Địa chỉ W_...">
+                    </div>
+                    <div class="form-group">
+                        <input type="password" id="login-password" placeholder="Mật khẩu">
+                    </div>
+                    <div class="button-container">
+                        <button id="login-btn">Đăng nhập</button>
+                        <button id="logout-btn" class="secondary">Đăng xuất</button>
+                    </div>
+                    <div id="login-result" class="result"></div>
+                </div>
+            </div>
+
+            <div id="wallet-info" style="display: none;" class="wallet-info">
+                <h3>💰 Thông tin ví</h3>
+                <p><strong>Địa chỉ ví đầy đủ:</strong></p>
+                <div class="address-display" id="wallet-display-address"></div>
+                <p><strong>Số dư:</strong> <span class="balance" id="wallet-balance">0</span> WebCoin</p>
+                <button id="refresh-balance-btn" class="w-auto" style="margin-top: 10px;">Cập nhật số dư</button>
+            </div>
+        </div>
+
+        <!-- Tab Gửi -->
+        <div id="send" class="tab-content">
+            <h2>💸 Gửi giao dịch</h2>
+            <div class="info-box" id="send-info">Vui lòng đăng nhập trước.</div>
+            <div class="form-group">
+                <label>Địa chỉ người gửi (của bạn):</label>
+                <textarea id="send-from" readonly rows="3" style="background:#e9ecef;"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Địa chỉ người nhận (W_...):</label>
+                <input type="text" id="send-to" placeholder="W_...">
+            </div>
+            <div class="form-group">
+                <label>Số lượng:</label>
+                <input type="number" id="send-amount" min="1" placeholder="Số lượng">
+            </div>
+            <button id="send-btn">Ký và gửi</button>
+            <div id="send-result" class="result"></div>
+        </div>
+
+        <!-- Tab Lịch sử -->
+        <div id="history" class="tab-content">
+            <h2>📜 Lịch sử giao dịch</h2>
+            <div class="info-box" id="history-info">Vui lòng đăng nhập để xem lịch sử.</div>
+            
+            <div id="history-controls" style="display: none;">
+                <div class="flex-row" style="margin-bottom: 20px;">
+                    <select id="history-filter" style="flex: 1;">
+                        <option value="all">📋 Tất cả</option>
+                        <option value="send">📤 Đã gửi</option>
+                        <option value="receive">📥 Đã nhận</option>
+                        <option value="mine">⛏️ Đào được</option>
+                    </select>
+                    <button id="refresh-history-btn" class="w-auto" style="padding: 12px 20px;">🔄</button>
+                </div>
+                
+                <div id="history-list" style="max-height: 500px; overflow-y: auto;">
+                    <!-- Lịch sử sẽ được hiển thị ở đây -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab Đào -->
+        <div id="mine" class="tab-content">
+            <h2>⛏️ Đào block</h2>
+            <div class="info-box">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <p><strong>Độ khó mạng:</strong> <span id="mine-difficulty">0</span></p>
+                        <p><strong>Phần thưởng hiện tại:</strong> <span id="mine-reward">0</span> WebCoin</p>
+                        <p><strong>Phần thưởng min-max:</strong> <span id="min-reward">10</span> - <span id="max-reward">200</span> WebCoin</p>
+                        <p><strong>Giao dịch chờ:</strong> <span id="mine-pending">0</span></p>
+                    </div>
+                    
+                    <!-- Thanh trượt điều chỉnh độ khó -->
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; min-width: 200px;">
+                        <p><strong>⚙️ Điều chỉnh độ khó đào:</strong></p>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <input type="range" id="difficulty-slider" min="1" max="10" value="3" step="1" 
+                                   style="flex: 1;">
+                            <span id="current-difficulty-display" style="font-weight: bold; min-width: 30px;">3</span>
+                        </div>
+                        <div id="difficulty-warning" style="font-size: 0.85em; margin-top: 5px; min-height: 20px;"></div>
+                        <p style="font-size: 0.85em; color: #6c757d; margin-top: 5px;">
+                            <small>Độ khó càng cao càng lâu, nhưng block dễ được chấp nhận hơn</small>
+                        </p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label>Địa chỉ nhận thưởng (của bạn):</label>
+                <textarea id="mine-address" readonly rows="3" style="background:#e9ecef;"></textarea>
+            </div>
+            
+            <div class="button-container" style="margin-top: 20px;">
+                <button id="mine-btn" style="flex: 2;">Bắt đầu đào</button>
+                <button id="mine-simple-btn" class="warning" style="flex: 1;">⚡ Đào nhanh</button>
+            </div>
+            
+            <div id="mining-log"></div>
+        </div>
+
+        <!-- Tab Blockchain -->
+        <div id="blockchain" class="tab-content">
+            <h2>🔗 Blockchain</h2>
+            <button id="refresh-chain-btn" class="w-auto" style="margin-bottom: 20px;">Tải lại</button>
+            <pre id="chain-display"></pre>
+        </div>
+    </div>
+
+    <script src="script.js?v=10"></script>
+</body>
+</html>
