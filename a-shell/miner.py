@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-WebCoin Pro Miner - Fixed version for a-Shell
-- Bỏ py-cpuinfo (không tương thích ARM)
-- Dùng thông tin CPU từ os
-- Chạy được trên a-Shell
+WebCoin Miner - Simple Version
+- Nhập địa chỉ ví (W_...)
+- Nhập mật khẩu thường (tự động tạo private key)
+- Chọn số luồng CPU
+- Chọn % CPU sử dụng
+- Lưu cấu hình tự động
 """
 
 import os
@@ -54,19 +56,6 @@ except:
         RESET_ALL = '\033[0m'
     Back = None
 
-try:
-    import serial
-    import serial.tools.list_ports
-    HAS_SERIAL = True
-except:
-    pass
-
-try:
-    from pypresence import Presence
-    HAS_PRESENCE = True
-except:
-    pass
-
 # ============== CẤU HÌNH ==============
 DEFAULT_WALLET = "W_042389ad1649d3e9566c95761a64e48322b5c85b589398557bb6ee6af006f6c1a9c3657648bfefc42b0c2c945f4f05a3d306ee6473e8e8b02e12b86be41dc45437"
 DEFAULT_PASSWORD = "12345678Nn"
@@ -88,7 +77,7 @@ stats_lock = threading.Lock()
 
 # Thông tin CPU
 CPU_CORES = multiprocessing.cpu_count()
-CPU_NAME = f"ARM ({CPU_CORES} cores)"
+CPU_NAME = f"CPU ({CPU_CORES} cores)"
 
 # Discord RPC
 RPC = None
@@ -138,6 +127,11 @@ def http_request(method, path, data=None):
         return json.loads(parts[1])
     except Exception as e:
         return None
+
+# ============== HÀM TẠO PRIVATE KEY ==============
+def generate_private_key(password):
+    """Tạo private key 64 hex từ mật khẩu"""
+    return hashlib.sha256(password.encode()).hexdigest()
 
 # ============== API FUNCTIONS ==============
 def login(wallet, password):
@@ -201,9 +195,6 @@ def submit_block(height, nonce, hash_value, prev_hash, reward, wallet):
 def sha1_hash(data):
     return hashlib.sha1(data.encode()).hexdigest()
 
-def generate_private_key(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
 def calculate_block_hash(height, prev_hash, timestamp, tx_string, nonce):
     data = f"{height}{prev_hash}{timestamp}{tx_string}{nonce}"
     return sha1_hash(data)
@@ -248,46 +239,27 @@ def load_config():
     }
 
 def validate_wallet(address):
-    if not address or not address.startswith('W_'):
-        return False
+    """Kiểm tra địa chỉ ví hợp lệ"""
+    if not address:
+        return False, "Địa chỉ trống"
+    if not address.startswith('W_'):
+        return False, "Địa chỉ phải bắt đầu bằng W_"
+    
     hex_part = address[2:]
     if len(hex_part) != 64:
-        return False
+        return False, f"Phần hex phải 64 ký tự (bạn có {len(hex_part)})"
+    
     try:
         int(hex_part, 16)
-        return True
+        return True, "OK"
     except:
-        return False
-
-# ============== DISCORD RICH PRESENCE ==============
-def update_discord():
-    global RPC, running
-    while running and RPC:
-        try:
-            with stats_lock:
-                hashes = total_hashes
-                blocks = blocks_mined
-                reward = total_reward
-            
-            RPC.update(
-                details=f"Mining WebCoin | {blocks} blocks",
-                state=f"{hashes:,} hashes | {reward} WBC",
-                large_image="webcoin",
-                large_text=f"Hashrate: {get_hashrate():.1f} kH/s",
-                start=start_time,
-                buttons=[
-                    {"label": "WebCoin", "url": "https://webcoin-1n9d.onrender.com"},
-                    {"label": "Join Discord", "url": "https://discord.gg/webcoin"}
-                ]
-            )
-        except:
-            pass
-        time.sleep(15)
+        return False, "Địa chỉ chứa ký tự không hợp lệ"
 
 # ============== MINING THREAD ==============
 def mining_thread(thread_id, wallet, password, difficulty_override, target_cpu_percent):
     global total_hashes, blocks_mined, total_reward, running
     
+    # Tạo private key từ password
     private_key = generate_private_key(password)
     delay_time = (100 - target_cpu_percent) / 1000
     last_cpu_check = time.time()
@@ -441,13 +413,13 @@ def main():
     global running, start_time
     
     print_color("\n" + "="*60, Fore.MAGENTA, bright=True)
-    print_color(" WEBCCOIN PRO MINER v2.0 - FIXED", Fore.MAGENTA, bright=True)
+    print_color(" WEBCCOIN MINER - SIMPLE EDITION", Fore.MAGENTA, bright=True)
     print_color("="*60, Fore.MAGENTA, bright=True)
     
     print_color(f"📊 System Info:", Fore.CYAN)
     print_color(f"   🖥️  CPU: {CPU_NAME}", Fore.CYAN)
     
-    # Đọc config
+    # Đọc config cũ
     config = load_config()
     
     if config and input(f"{Fore.YELLOW}📁 Load previous config? (y/n): {Fore.RESET}").lower() == 'y':
@@ -460,31 +432,39 @@ def main():
     else:
         print_color(f"\n📝 CONFIGURATION", Fore.YELLOW)
         
-        wallet = input(f"Wallet address (Enter for default): ").strip()
-        if not wallet:
-            wallet = DEFAULT_WALLET
-            print_color(f"   Using default", Fore.CYAN)
+        # Nhập địa chỉ ví
+        while True:
+            wallet = input(f"Wallet address (W_...) [Enter for default]: ").strip()
+            if not wallet:
+                wallet = DEFAULT_WALLET
+                print_color(f"   Using default wallet", Fore.CYAN)
+                break
+            valid, msg = validate_wallet(wallet)
+            if valid:
+                break
+            print_color(f"❌ {msg}", Fore.RED)
         
-        if not validate_wallet(wallet):
-            print_color(f"❌ Invalid wallet address!", Fore.RED)
-            return
-        
-        password = input(f"Wallet password (Enter for default): ").strip()
+        # Nhập mật khẩu (không cần hex)
+        password = input(f"Wallet password [Enter for default]: ").strip()
         if not password:
             password = DEFAULT_PASSWORD
             print_color(f"   Using default password", Fore.CYAN)
         
+        # Số threads
         thread_input = input(f"Threads (1-{CPU_CORES*2}) [default: {CPU_CORES}]: ").strip()
         threads = int(thread_input) if thread_input else CPU_CORES
         threads = max(1, min(threads, CPU_CORES * 2))
         
+        # % CPU
         cpu_input = input(f"CPU % (10-100) [default: 100]: ").strip()
         cpu_percent = int(cpu_input) if cpu_input else 100
         cpu_percent = max(10, min(cpu_percent, 100))
         
+        # Độ khó
         diff_input = input(f"Difficulty override (1-10, Enter for auto): ").strip()
         difficulty_override = int(diff_input) if diff_input else None
         
+        # Lưu config
         save_config(wallet, password, threads, cpu_percent, difficulty_override)
     
     # Đăng nhập
@@ -492,7 +472,7 @@ def main():
     login_result = login(wallet, password)
     
     if not login_result or "error" in login_result:
-        print_color(f"❌ Login failed!", Fore.RED)
+        print_color(f"❌ Login failed! Check wallet and password", Fore.RED)
         return
     
     print_color(f"✅ Login successful!", Fore.GREEN)
