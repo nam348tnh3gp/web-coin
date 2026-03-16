@@ -1,61 +1,49 @@
 #!/usr/bin/env python3
 """
-WebCoin Official PC Miner 1.0
-CPU Mining Edition - KHÔNG CẦN MẬT KHẨU
-- Chỉ cần địa chỉ ví
-- Chọn số threads
-- Chọn độ khó
+WebCoin Miner - Có mật khẩu thường (không hex)
+- Nhập địa chỉ ví + mật khẩu thường
+- Tự động đăng nhập
+- Chọn số luồng CPU, % CPU
 - Lưu cấu hình
+- Đào và gửi block
 """
 
-import sys
 import os
-import json
+import sys
 import time
-import socket
+import json
 import hashlib
 import threading
-import requests
+import multiprocessing
 from datetime import datetime
-from multiprocessing import Process, Manager, cpu_count
-from configparser import ConfigParser
-from signal import SIGINT, signal
+import configparser
+import requests
 from colorama import init, Fore, Back, Style
+import getpass
 
-# Khởi tạo colorama
 init(autoreset=True)
 
 # ============== CẤU HÌNH ==============
 VERSION = "1.0"
 SERVER_URL = "https://webcoin-1n9d.onrender.com/api"
-DATA_DIR = f"WebCoin-PC-Miner-{VERSION}"
-SETTINGS_FILE = "/config.cfg"
+DATA_DIR = "WebCoin-Miner"
+SETTINGS_FILE = "config.ini"
 SOC_TIMEOUT = 10
-REPORT_TIME = 300
 
-debug_mode = False
 running = True
+total_hashes = 0
+blocks_mined = 0
+total_reward = 0
+start_time = time.time()
+stats_lock = threading.Lock()
+CPU_CORES = multiprocessing.cpu_count()
+auth_cookie = None  # Lưu cookie sau khi đăng nhập
 
 # ============== TIỆN ÍCH ==============
 def now():
     return datetime.now()
 
-def handler(signal_received, frame):
-    """Xử lý Ctrl+C"""
-    global running
-    print(f"\n{Fore.YELLOW}⛔ Shutting down...{Style.RESET_ALL}")
-    running = False
-    sys.exit(0)
-
-signal(SIGINT, handler)
-
-def debug_print(msg):
-    """In debug nếu được bật"""
-    if debug_mode:
-        print(f"{Fore.WHITE}{Style.DIM}[DEBUG] {msg}{Style.RESET_ALL}")
-
 def get_prefix(val):
-    """Định dạng hashrate (H/s, kH/s, MH/s)"""
     if val >= 1_000_000:
         return f"{val/1_000_000:.2f} MH/s"
     elif val >= 1_000:
@@ -63,411 +51,378 @@ def get_prefix(val):
     else:
         return f"{val:.2f} H/s"
 
-def title(title_str):
-    """Đổi tiêu đề console"""
-    if os.name == 'nt':
-        os.system(f'title {title_str}')
-    else:
-        print(f'\33]0;{title_str}\a', end='')
-        sys.stdout.flush()
+def print_color(text, color=Fore.WHITE, bright=False):
+    style = Style.BRIGHT if bright else ""
+    print(f"{color}{style}{text}{Style.RESET_ALL}")
 
-def clear_screen():
-    """Xóa màn hình console"""
-    os.system('cls' if os.name == 'nt' else 'clear')
+# ============== API ==============
+def login(wallet, password):
+    """Đăng nhập và lấy cookie"""
+    try:
+        data = {"displayAddress": wallet, "password": password}
+        resp = requests.post(f"{SERVER_URL}/login", json=data, timeout=SOC_TIMEOUT)
+        if resp.status_code == 200:
+            result = resp.json()
+            if "error" not in result:
+                # Lấy cookie từ header
+                cookie = resp.headers.get("set-cookie", "")
+                if cookie:
+                    return cookie.split(";")[0]
+                return True
+        return None
+    except Exception as e:
+        print_color(f"❌ Lỗi đăng nhập: {e}", Fore.RED)
+        return None
 
-# ============== GIAO DIỆN NHẬP LIỆU ==============
-def print_banner():
-    """In banner đẹp"""
-    clear_screen()
-    print(f"{Fore.CYAN}{Style.BRIGHT}")
-    print("╔══════════════════════════════════════════════════════════╗")
-    print("║                    WEBCCOIN PC MINER                    ║")
-    print("║                      Version 1.0                        ║")
-    print("║                  CPU Mining Edition                     ║")
-    print("║              KHÔNG CẦN MẬT KHẨU - CHỈ CẦN VÍ            ║")
-    print("╚══════════════════════════════════════════════════════════╝")
-    print(f"{Style.RESET_ALL}\n")
-
-def input_wallet_address():
-    """Nhập địa chỉ ví"""
-    while True:
-        print(f"\n{Fore.CYAN}📝 WALLET ADDRESS{Style.RESET_ALL}")
-        print("Your wallet address starts with 'W_' followed by your public key")
-        
-        addr = input(f"\n{Fore.YELLOW}Enter wallet address: {Style.BRIGHT}").strip()
-        
-        if not addr:
-            print(f"{Fore.RED}❌ Wallet address cannot be empty!{Style.RESET_ALL}")
-            continue
-            
-        if not addr.startswith('W_'):
-            print(f"{Fore.YELLOW}⚠️ Address doesn't start with 'W_'. Adding it automatically...{Style.RESET_ALL}")
-            addr = 'W_' + addr
-        
-        # Kiểm tra sơ bộ
-        if len(addr) < 10:
-            print(f"{Fore.RED}❌ Address seems too short. Please check!{Style.RESET_ALL}")
-            continue
-        
-        return addr
-
-def input_difficulty():
-    """Nhập độ khó"""
-    print(f"\n{Fore.CYAN}⚙️ DIFFICULTY LEVEL{Style.RESET_ALL}")
-    print(" 1 - Low    (Faster mining, lower reward - 2 zeros)")
-    print(" 2 - Medium (Balanced - 3 zeros)")
-    print(" 3 - High   (Slower, higher reward - 4 zeros)")
-    print(" 4 - Auto   (Follow network difficulty)")
-    
-    while True:
-        choice = input(f"{Fore.YELLOW}Choose (1-4) [default: 4]: {Style.BRIGHT}").strip()
-        
-        if not choice:
-            return "NET"
-        
-        if choice == "1":
-            return "LOW"
-        elif choice == "2":
-            return "MEDIUM"
-        elif choice == "3":
-            return "HIGH"
-        elif choice == "4":
-            return "NET"
-        else:
-            print(f"{Fore.RED}❌ Invalid choice! Please enter 1-4.{Style.RESET_ALL}")
-
-def input_threads():
-    """Nhập số threads"""
-    max_threads = cpu_count()
-    print(f"\n{Fore.CYAN}🧵 NUMBER OF THREADS{Style.RESET_ALL}")
-    print(f"Your CPU has {max_threads} cores available")
-    
-    while True:
-        choice = input(f"{Fore.YELLOW}Threads (1-{max_threads}) [default: {max_threads}]: {Style.BRIGHT}").strip()
-        
-        if not choice:
-            return max_threads
-        
-        try:
-            threads = int(choice)
-            if 1 <= threads <= max_threads:
-                return threads
-            else:
-                print(f"{Fore.RED}❌ Please enter a number between 1 and {max_threads}{Style.RESET_ALL}")
-        except ValueError:
-            print(f"{Fore.RED}❌ Invalid number!{Style.RESET_ALL}")
-
-def input_identifier():
-    """Nhập tên rig"""
-    print(f"\n{Fore.CYAN}🏷️ RIG IDENTIFIER (Optional){Style.RESET_ALL}")
-    print("Give this miner a name to identify it in logs")
-    
-    ident = input(f"{Fore.YELLOW}Rig name: {Style.BRIGHT}").strip()
-    return ident if ident else "None"
-
-def toggle_debug(current):
-    """Bật/tắt debug mode"""
-    print(f"\n{Fore.CYAN}🐛 DEBUG MODE{Style.RESET_ALL}")
-    print(f"Current: {'ON' if current else 'OFF'}")
-    
-    choice = input(f"{Fore.YELLOW}Enable debug? (y/N): {Style.BRIGHT}").strip().lower()
-    return choice == 'y'
-
-def save_config(config_data):
-    """Lưu cấu hình vào file"""
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
-    
-    config = ConfigParser()
-    config["WebCoin"] = config_data
-    
-    with open(DATA_DIR + SETTINGS_FILE, "w") as f:
-        config.write(f)
-    
-    print(f"{Fore.GREEN}✅ Configuration saved to {DATA_DIR + SETTINGS_FILE}{Style.RESET_ALL}")
-
-def load_config():
-    """Đọc cấu hình từ file hoặc tạo mới"""
-    config_path = DATA_DIR + SETTINGS_FILE
-    
-    if os.path.exists(config_path):
-        config = ConfigParser()
-        config.read(config_path)
-        
-        print(f"{Fore.GREEN}✅ Loaded existing configuration{Style.RESET_ALL}")
-        return config["WebCoin"]
-    
+def get_network_info():
+    """Lấy thông tin mạng"""
+    try:
+        resp = requests.get(f"{SERVER_URL}/info", timeout=SOC_TIMEOUT)
+        if resp.status_code == 200:
+            return resp.json()
+    except:
+        pass
     return None
 
-def interactive_setup():
-    """Thiết lập tương tác - KHÔNG CẦN MẬT KHẨU"""
-    print_banner()
-    
-    # Thử đọc config cũ
-    existing = load_config()
-    config_data = {}
-    
-    if existing:
-        print(f"{Fore.CYAN}Found existing configuration:{Style.RESET_ALL}")
-        print(f"  Wallet: {existing.get('username', 'N/A')[:20]}...")
-        print(f"  Difficulty: {existing.get('start_diff', 'N/A')}")
-        print(f"  Threads: {existing.get('threads', 'N/A')}")
-        
-        use_existing = input(f"\n{Fore.YELLOW}Use existing config? (Y/n): {Style.BRIGHT}").strip().lower()
-        if use_existing != 'n':
-            return existing
-    
-    # Nếu không có config cũ hoặc không dùng, tạo mới
-    print(f"\n{Fore.GREEN}{Style.BRIGHT}🔧 LET'S SET UP YOUR MINER{Style.RESET_ALL}")
-    print("You'll need your wallet address.")
-    print("If you don't have a wallet yet, create one at: https://webcoin-1n9d.onrender.com\n")
-    
-    input(f"{Fore.CYAN}Press Enter to continue...{Style.RESET_ALL}")
-    
-    # Nhập từng mục (BỎ PHẦN PASSWORD)
-    config_data["username"] = input_wallet_address()
-    config_data["start_diff"] = input_difficulty()
-    config_data["threads"] = str(input_threads())
-    config_data["identifier"] = input_identifier()
-    config_data["debug"] = str(toggle_debug(False)).lower()
-    config_data["soc_timeout"] = str(SOC_TIMEOUT)
-    config_data["report_sec"] = str(REPORT_TIME)
-    
-    # Hiển thị tổng kết
-    print_banner()
-    print(f"{Fore.GREEN}{Style.BRIGHT}📋 CONFIGURATION SUMMARY{Style.RESET_ALL}")
-    print("═" * 50)
-    print(f"  Wallet:     {config_data['username'][:30]}...")
-    print(f"  Difficulty: {config_data['start_diff']}")
-    print(f"  Threads:    {config_data['threads']}")
-    print(f"  Rig ID:     {config_data['identifier']}")
-    print(f"  Debug:      {config_data['debug']}")
-    print("═" * 50)
-    
-    # Xác nhận
-    confirm = input(f"\n{Fore.YELLOW}Save this configuration and start mining? (Y/n): {Style.BRIGHT}").strip().lower()
-    if confirm == 'n':
-        print(f"{Fore.RED}Setup cancelled.{Style.RESET_ALL}")
-        sys.exit(0)
-    
-    # Lưu config
-    save_config(config_data)
-    
-    return config_data
-
-# ============== GIAO TIẾP MẠNG ==============
-class WebCoinClient:
-    @staticmethod
-    def fetch_pool():
-        """Lấy thông tin pool (dùng server chính)"""
-        return ("webcoin-1n9d.onrender.com", 443)
-    
-    @staticmethod
-    def connect(pool):
-        """Kết nối socket"""
-        import ssl
-        sock = socket.socket()
-        sock.settimeout(SOC_TIMEOUT)
-        
-        context = ssl.create_default_context()
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-        
-        ssl_sock = context.wrap_socket(sock, server_hostname=pool[0])
-        ssl_sock.connect(pool)
-        return ssl_sock
-    
-    @staticmethod
-    def send(sock, msg):
-        sock.sendall(f"{msg}\n".encode())
-    
-    @staticmethod
-    def recv(sock, limit=4096):
-        return sock.recv(limit).decode().strip()
+def submit_block(height, nonce, hash_value, prev_hash, reward, wallet, cookie):
+    """Gửi block lên server"""
+    public_key = wallet[2:]
+    data = {
+        "height": height,
+        "transactions": [{
+            "from": None,
+            "to": public_key,
+            "amount": reward,
+            "timestamp": int(time.time() * 1000),
+            "signature": None
+        }],
+        "previousHash": prev_hash,
+        "timestamp": int(time.time() * 1000),
+        "nonce": nonce,
+        "hash": hash_value,
+        "minerAddress": wallet
+    }
+    headers = {"Content-Type": "application/json"}
+    if cookie:
+        headers["Cookie"] = cookie
+    try:
+        resp = requests.post(f"{SERVER_URL}/blocks/submit", json=data, headers=headers, timeout=SOC_TIMEOUT)
+        return resp.status_code == 200
+    except:
+        return False
 
 # ============== THUẬT TOÁN ĐÀO ==============
-class Algorithms:
-    @staticmethod
-    def WEBCOIN_S1(last_h, target_prefix, diff, intensity):
-        """
-        Thuật toán đào WebCoin (SHA-1 based)
-        Tìm hash bắt đầu bằng '0' * diff
-        """
-        start_time = time.time_ns()
-        
-        base_hash = hashlib.sha1(last_h.encode()).copy()
-        max_nonce = 100000 * diff
-        
-        for nonce in range(max_nonce):
-            temp_h = base_hash.copy()
-            temp_h.update(str(nonce).encode())
-            result = temp_h.hexdigest()
-            
-            if intensity > 0 and nonce % 5000 == 0:
-                time.sleep(intensity / 1000)
-            
-            if result.startswith(target_prefix):
-                elapsed = time.time_ns() - start_time
-                hashrate = 1e9 * nonce / elapsed if elapsed > 0 else 0
-                return [nonce, hashrate, result]
-        
-        return [0, 0, ""]
+def sha1_hash(data):
+    return hashlib.sha1(data.encode()).hexdigest()
+
+def calculate_block_hash(height, prev_hash, timestamp, tx_string, nonce):
+    return sha1_hash(f"{height}{prev_hash}{timestamp}{tx_string}{nonce}")
 
 # ============== THREAD ĐÀO ==============
-def mining_thread(thread_id, user_settings, share_stats, pool, print_queue):
-    """Thread đào chính - KHÔNG CẦN LOGIN"""
-    username = user_settings["username"]
-    start_diff = user_settings["start_diff"]
-    identifier = user_settings["identifier"]
-    
-    debug_print(f"Thread {thread_id} started")
-    
+def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, cookie):
+    global total_hashes, blocks_mined, total_reward, running
+
+    delay_time = (100 - target_cpu_percent) / 1000
+    print_color(f"🧵 Thread {thread_id} started", Fore.CYAN)
+
     while running:
         try:
-            # Xác định độ khó
-            if start_diff == "LOW":
-                diff = 2
-            elif start_diff == "MEDIUM":
-                diff = 3
-            elif start_diff == "HIGH":
-                diff = 4
-            else:  # NET
-                try:
-                    response = requests.get(f"{SERVER_URL}/info", timeout=5)
-                    if response.status_code == 200:
-                        info = response.json()
-                        diff = info.get("difficulty", 3)
-                    else:
-                        diff = 3
-                except:
-                    diff = 3
-            
-            # Tạo last_h từ username và timestamp
-            last_h = hashlib.sha1(f"{username}{time.time()}{thread_id}".encode()).hexdigest()
-            
-            # Target prefix: '0' * diff
-            target_prefix = "0" * diff
-            
-            # Đào
-            intensity = 0
-            result = Algorithms.WEBCOIN_S1(last_h, target_prefix, diff, intensity)
-            
-            if result[0] > 0:
-                # Tìm thấy nonce
-                share_stats["accepted"] += 1
-                
-                # Format output
-                time_str = now().strftime("%H:%M:%S")
-                
-                share_msg = (
-                    f"{Fore.WHITE}{time_str} "
-                    f"{Fore.WHITE}{Style.BRIGHT}{Back.YELLOW} cpu{thread_id} {Style.RESET_ALL}"
-                    f"{Fore.GREEN} ✅ Found "
-                    f"nonce:{result[0]} "
-                    f"hash:{result[2][:10]}... "
-                    f"speed:{get_prefix(result[1])} "
-                    f"diff:{diff}"
-                )
-                print_queue.append(share_msg)
-            else:
-                share_stats["rejected"] += 1
-            
-            # Báo cáo định kỳ
-            if thread_id == 0 and share_stats["accepted"] % 10 == 0 and share_stats["accepted"] > 0:
-                print_queue.append(
-                    f"{Fore.CYAN}📊 Thread 0: {share_stats['accepted']} solutions found{Style.RESET_ALL}"
-                )
-                
-        except Exception as e:
-            debug_print(f"Thread {thread_id} error: {e}")
-            time.sleep(5)
+            info = get_network_info()
+            if not info or not info.get('latestBlock'):
+                time.sleep(0.5)
+                continue
 
-# ============== XỬ LÝ IN ẤN ==============
-def print_queue_handler(print_queue):
-    """Xử lý hàng đợi in ấn"""
+            latest = info['latestBlock']
+            network_diff = info.get('difficulty', 3)
+            reward = info.get('reward', 48)
+
+            difficulty = difficulty_override if difficulty_override else network_diff
+            target = "0" * difficulty
+
+            timestamp = int(time.time() * 1000)
+            tx_string = "[]"
+            nonce = 0
+            start_local = time.time()
+            attempts = 0
+
+            while running:
+                hash_value = calculate_block_hash(
+                    latest['height'] + 1,
+                    latest['hash'],
+                    timestamp,
+                    tx_string,
+                    nonce
+                )
+
+                with stats_lock:
+                    total_hashes += 1
+
+                attempts += 1
+
+                if delay_time > 0 and attempts % 100 == 0:
+                    time.sleep(delay_time * 100)
+
+                if hash_value.startswith(target):
+                    elapsed = time.time() - start_local
+                    print_color(f"\n🎯 Thread {thread_id}: Found nonce {nonce} in {elapsed:.2f}s", Fore.GREEN)
+
+                    if thread_id == 0:
+                        if submit_block(
+                            latest['height'] + 1,
+                            nonce,
+                            hash_value,
+                            latest['hash'],
+                            reward,
+                            wallet,
+                            cookie
+                        ):
+                            with stats_lock:
+                                blocks_mined += 1
+                                total_reward += reward
+                            print_color(f"✅ Block accepted! +{reward} WBC", Fore.GREEN)
+                        else:
+                            print_color(f"❌ Block rejected!", Fore.RED)
+                    break
+
+                nonce += 1
+
+                if thread_id == 0 and attempts % 10000 == 0:
+                    speed = attempts / (time.time() - start_local)
+                    print_color(f"   Thread 0: {attempts} hashes, {speed:.0f} H/s", Fore.YELLOW)
+
+        except Exception as e:
+            print_color(f"Thread {thread_id} error: {e}", Fore.RED)
+            time.sleep(1)
+
+# ============== STATS THREAD ==============
+def stats_thread():
+    global running
+    last_hashes = 0
+    last_time = time.time()
+
     while running:
-        if print_queue:
-            print(print_queue.pop(0))
-        time.sleep(0.01)
+        time.sleep(5)
+        with stats_lock:
+            current_hashes = total_hashes
+            current_blocks = blocks_mined
+            current_reward = total_reward
+
+        now = time.time()
+        elapsed_total = now - start_time
+        speed = (current_hashes - last_hashes) / (now - last_time) if (now - last_time) > 0 else 0
+
+        print_color(f"\n📊 STATS [{int(elapsed_total/60)}m {int(elapsed_total%60)}s]", Fore.MAGENTA, bright=True)
+        print_color(f"   Total hashes: {current_hashes:,}", Fore.CYAN)
+        print_color(f"   Speed: {speed/1000:.2f} kH/s", Fore.CYAN)
+        print_color(f"   Blocks mined: {current_blocks}", Fore.GREEN)
+        print_color(f"   Total reward: {current_reward} WBC", Fore.GREEN)
+
+        last_hashes = current_hashes
+        last_time = now
+
+# ============== CẤU HÌNH ==============
+def save_config(wallet, password, threads, cpu_percent, difficulty):
+    config = configparser.ConfigParser()
+    config["WebCoin"] = {
+        "wallet": wallet,
+        "password": password,
+        "threads": str(threads),
+        "cpu_percent": str(cpu_percent),
+        "difficulty": str(difficulty) if difficulty else "auto"
+    }
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
+    with open(os.path.join(DATA_DIR, SETTINGS_FILE), "w") as f:
+        config.write(f)
+    print_color(f"✅ Config saved", Fore.GREEN)
+
+def load_config():
+    config_path = os.path.join(DATA_DIR, SETTINGS_FILE)
+    if not os.path.exists(config_path):
+        return None
+    config = configparser.ConfigParser()
+    config.read(config_path)
+    if "WebCoin" not in config:
+        return None
+    data = config["WebCoin"]
+    diff = data.get("difficulty")
+    if diff == "auto":
+        diff = None
+    elif diff:
+        diff = int(diff)
+    return {
+        "wallet": data.get("wallet", ""),
+        "password": data.get("password", ""),
+        "threads": int(data.get("threads", CPU_CORES)),
+        "cpu_percent": int(data.get("cpu_percent", 100)),
+        "difficulty": diff
+    }
+
+# ============== GIAO DIỆN NHẬP LIỆU ==============
+def input_wallet():
+    while True:
+        addr = input(f"{Fore.YELLOW}Địa chỉ ví (W_...): {Style.RESET_ALL}").strip()
+        if not addr:
+            print_color("❌ Không được để trống", Fore.RED)
+            continue
+        if not addr.startswith('W_'):
+            addr = 'W_' + addr
+            print_color(f"⚠️ Đã thêm W_: {addr}", Fore.YELLOW)
+        if len(addr) < 10:
+            print_color("❌ Địa chỉ quá ngắn", Fore.RED)
+            continue
+        return addr
+
+def input_password():
+    while True:
+        pwd = getpass.getpass(f"{Fore.YELLOW}Mật khẩu ví: {Style.RESET_ALL}")
+        if not pwd:
+            print_color("❌ Mật khẩu không được để trống", Fore.RED)
+            continue
+        if len(pwd) < 6:
+            print_color("❌ Mật khẩu phải có ít nhất 6 ký tự", Fore.RED)
+            continue
+        pwd2 = getpass.getpass(f"{Fore.YELLOW}Nhập lại mật khẩu: {Style.RESET_ALL}")
+        if pwd != pwd2:
+            print_color("❌ Mật khẩu không khớp", Fore.RED)
+            continue
+        return pwd
+
+def input_threads():
+    max_th = CPU_CORES * 2
+    default = CPU_CORES
+    while True:
+        val = input(f"{Fore.YELLOW}Số luồng (1-{max_th}) [mặc định {default}]: {Style.RESET_ALL}").strip()
+        if not val:
+            return default
+        try:
+            t = int(val)
+            if 1 <= t <= max_th:
+                return t
+            else:
+                print_color(f"❌ Nhập từ 1 đến {max_th}", Fore.RED)
+        except:
+            print_color("❌ Không hợp lệ", Fore.RED)
+
+def input_cpu_percent():
+    while True:
+        val = input(f"{Fore.YELLOW}% CPU (10-100) [mặc định 100]: {Style.RESET_ALL}").strip()
+        if not val:
+            return 100
+        try:
+            p = int(val)
+            if 10 <= p <= 100:
+                return p
+            else:
+                print_color("❌ Nhập từ 10 đến 100", Fore.RED)
+        except:
+            print_color("❌ Không hợp lệ", Fore.RED)
+
+def input_difficulty():
+    print_color("\n⚙️ Độ khó:", Fore.CYAN)
+    print(" 1 - Thấp (2 số 0, thưởng thấp)")
+    print(" 2 - Trung bình (3 số 0)")
+    print(" 3 - Cao (4 số 0, thưởng cao)")
+    print(" 4 - Tự động (theo mạng)")
+    while True:
+        choice = input(f"{Fore.YELLOW}Chọn (1-4) [mặc định 4]: {Style.RESET_ALL}").strip()
+        if not choice:
+            return None  # auto
+        if choice == "1":
+            return 2
+        elif choice == "2":
+            return 3
+        elif choice == "3":
+            return 4
+        elif choice == "4":
+            return None
+        else:
+            print_color("❌ Chọn 1-4", Fore.RED)
 
 # ============== MAIN ==============
-if __name__ == "__main__":
-    # Thiết lập tương tác (KHÔNG CẦN MẬT KHẨU)
-    user_settings = interactive_setup()
-    
-    # Cập nhật debug mode
-    debug_mode = user_settings.get("debug") == "true"
-    
-    # Tiêu đề console
-    title(f"WebCoin Miner v{VERSION} - {user_settings['username'][:20]}...")
-    
-    # In banner bắt đầu
-    print_banner()
-    print(f"{Fore.GREEN}{Style.BRIGHT}🚀 STARTING MINER (NO PASSWORD REQUIRED){Style.RESET_ALL}")
-    print("═" * 50)
-    print(f"  Wallet:     {user_settings['username'][:30]}...")
-    print(f"  Difficulty: {user_settings['start_diff']}")
-    print(f"  Threads:    {user_settings['threads']}")
-    print(f"  Rig ID:     {user_settings['identifier']}")
-    print("═" * 50)
-    print(f"{Fore.YELLOW}Press Ctrl+C to stop mining{Style.RESET_ALL}\n")
-    
-    # Pool
-    pool = WebCoinClient.fetch_pool()
-    
-    # Shared variables
-    manager = Manager()
-    share_stats = manager.dict()
-    share_stats["accepted"] = 0
-    share_stats["rejected"] = 0
-    print_queue = manager.list()
-    
-    # Thread in ấn
-    threading.Thread(target=print_queue_handler, args=(print_queue,), daemon=True).start()
-    
-    # Khởi tạo threads
-    threads = []
-    num_threads = int(user_settings["threads"])
-    
-    for i in range(num_threads):
-        t = threading.Thread(
-            target=mining_thread,
-            args=(i, user_settings, share_stats, pool, print_queue),
-            daemon=True
-        )
+def main():
+    global running, start_time, auth_cookie
+
+    print_color("\n" + "="*60, Fore.MAGENTA, bright=True)
+    print_color(" WEBCCOIN MINER - CÓ MẬT KHẨU", Fore.MAGENTA, bright=True)
+    print_color("="*60, Fore.MAGENTA, bright=True)
+
+    # Đọc config cũ
+    config = load_config()
+    wallet = None
+    password = None
+    threads = CPU_CORES
+    cpu_percent = 100
+    difficulty_override = None
+
+    if config:
+        print_color(f"\n📁 Config cũ:", Fore.CYAN)
+        print_color(f"   Ví: {config['wallet'][:30]}...", Fore.CYAN)
+        print_color(f"   Threads: {config['threads']}", Fore.CYAN)
+        print_color(f"   CPU: {config['cpu_percent']}%", Fore.CYAN)
+        if input(f"{Fore.YELLOW}Dùng config này? (Y/n): ").lower() != 'n':
+            wallet = config['wallet']
+            password = config['password']
+            threads = config['threads']
+            cpu_percent = config['cpu_percent']
+            difficulty_override = config['difficulty']
+
+    if not wallet:
+        print_color("\n📝 NHẬP THÔNG TIN MỚI", Fore.YELLOW)
+        wallet = input_wallet()
+        password = input_password()
+        threads = input_threads()
+        cpu_percent = input_cpu_percent()
+        difficulty_override = input_difficulty()
+        save_config(wallet, password, threads, cpu_percent, difficulty_override)
+
+    # Đăng nhập
+    print_color(f"\n🔐 Đang đăng nhập...", Fore.YELLOW)
+    cookie = login(wallet, password)
+    if not cookie:
+        print_color(f"❌ Đăng nhập thất bại! Kiểm tra lại ví và mật khẩu.", Fore.RED)
+        return
+    auth_cookie = cookie
+    print_color(f"✅ Đăng nhập thành công!", Fore.GREEN)
+
+    # Lấy thông tin mạng
+    info = get_network_info()
+    if info:
+        print_color(f"\n📡 Mạng:", Fore.CYAN)
+        print_color(f"   Độ khó: {info.get('difficulty', '?')}", Fore.CYAN)
+        print_color(f"   Block cao nhất: {info.get('latestBlock', {}).get('height', '?')}", Fore.CYAN)
+        print_color(f"   Phần thưởng: {info.get('reward', '?')} WBC", Fore.CYAN)
+
+    # Bắt đầu đào
+    print_color(f"\n🚀 Bắt đầu đào với {threads} luồng, {cpu_percent}% CPU", Fore.GREEN)
+    print_color("="*60, Fore.MAGENTA)
+
+    start_time = time.time()
+
+    for i in range(threads):
+        t = threading.Thread(target=mining_thread, args=(i, wallet, difficulty_override, cpu_percent, cookie), daemon=True)
         t.start()
-        threads.append(t)
-    
-    # Vòng lặp chính - hiển thị thống kê
-    last_report = time.time()
-    last_accepted = 0
-    
+
+    stats = threading.Thread(target=stats_thread, daemon=True)
+    stats.start()
+
     try:
         while running:
-            time.sleep(5)
-            
-            if share_stats["accepted"] > 0 or share_stats["rejected"] > 0:
-                total = share_stats["accepted"] + share_stats["rejected"]
-                rate = share_stats["accepted"] / total * 100 if total > 0 else 0
-                
-                sys.stdout.write(
-                    f"\r{Fore.CYAN}📊 Found: {share_stats['accepted']} | "
-                    f"Failed: {share_stats['rejected']} | "
-                    f"Success rate: {rate:.1f}%{Style.RESET_ALL}"
-                )
-                sys.stdout.flush()
-            
+            time.sleep(1)
     except KeyboardInterrupt:
-        print(f"\n\n{Fore.YELLOW}⛔ Stopping miner...{Style.RESET_ALL}")
+        print_color(f"\n\n🛑 Đang dừng...", Fore.YELLOW)
         running = False
-    
-    # Thống kê cuối cùng
-    print(f"\n\n{Fore.GREEN}{Style.BRIGHT}📊 FINAL STATISTICS{Style.RESET_ALL}")
-    print("═" * 50)
-    print(f"  Total solutions found: {share_stats['accepted']}")
-    print(f"  Total failed attempts: {share_stats['rejected']}")
-    if share_stats['accepted'] + share_stats['rejected'] > 0:
-        rate = share_stats['accepted'] / (share_stats['accepted'] + share_stats['rejected']) * 100
-        print(f"  Success rate: {rate:.1f}%")
-    print("═" * 50)
-    print(f"{Fore.GREEN}👋 Goodbye!{Style.RESET_ALL}\n")
+
+    elapsed = time.time() - start_time
+    print_color(f"\n" + "="*60, Fore.MAGENTA, bright=True)
+    print_color(" KẾT QUẢ CUỐI CÙNG", Fore.MAGENTA, bright=True)
+    print_color("="*60, Fore.MAGENTA, bright=True)
+    print_color(f"⏱️  Thời gian: {int(elapsed/60)}m {int(elapsed%60)}s", Fore.CYAN)
+    print_color(f"🔢 Tổng hash: {total_hashes:,}", Fore.CYAN)
+    print_color(f"⚡ Tốc độ TB: {(total_hashes/elapsed)/1000:.2f} kH/s", Fore.CYAN)
+    print_color(f"⛏️  Blocks đào được: {blocks_mined}", Fore.GREEN)
+    print_color(f"💰 Tổng thưởng: {total_reward} WBC", Fore.GREEN)
+    print_color("="*60, Fore.MAGENTA)
+
+if __name__ == "__main__":
+    main()
