@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-WebCoin Miner - Có mật khẩu thường (không hex)
-- Nhập địa chỉ ví + mật khẩu thường
+WebCoin Miner - Mật khẩu hiển thị (không ẩn)
+- Nhập địa chỉ ví + mật khẩu thường (hiển thị)
 - Tự động đăng nhập
 - Chọn số luồng CPU, % CPU
 - Lưu cấu hình
@@ -19,7 +19,6 @@ from datetime import datetime
 import configparser
 import requests
 from colorama import init, Fore, Back, Style
-import getpass
 
 init(autoreset=True)
 
@@ -258,7 +257,7 @@ def load_config():
         "difficulty": diff
     }
 
-# ============== GIAO DIỆN NHẬP LIỆU ==============
+# ============== GIAO DIỆN NHẬP LIỆU (MẬT KHẨU HIỂN THỊ) ==============
 def input_wallet():
     while True:
         addr = input(f"{Fore.YELLOW}Địa chỉ ví (W_...): {Style.RESET_ALL}").strip()
@@ -275,14 +274,14 @@ def input_wallet():
 
 def input_password():
     while True:
-        pwd = getpass.getpass(f"{Fore.YELLOW}Mật khẩu ví: {Style.RESET_ALL}")
+        pwd = input(f"{Fore.YELLOW}Mật khẩu ví (hiển thị): {Style.RESET_ALL}").strip()
         if not pwd:
             print_color("❌ Mật khẩu không được để trống", Fore.RED)
             continue
         if len(pwd) < 6:
             print_color("❌ Mật khẩu phải có ít nhất 6 ký tự", Fore.RED)
             continue
-        pwd2 = getpass.getpass(f"{Fore.YELLOW}Nhập lại mật khẩu: {Style.RESET_ALL}")
+        pwd2 = input(f"{Fore.YELLOW}Nhập lại mật khẩu (hiển thị): {Style.RESET_ALL}").strip()
         if pwd != pwd2:
             print_color("❌ Mật khẩu không khớp", Fore.RED)
             continue
@@ -344,7 +343,7 @@ def main():
     global running, start_time, auth_cookie
 
     print_color("\n" + "="*60, Fore.MAGENTA, bright=True)
-    print_color(" WEBCCOIN MINER - CÓ MẬT KHẨU", Fore.MAGENTA, bright=True)
+    print_color(" WEBCCOIN MINER - MẬT KHẨU HIỂN THỊ", Fore.MAGENTA, bright=True)
     print_color("="*60, Fore.MAGENTA, bright=True)
 
     # Đọc config cũ
