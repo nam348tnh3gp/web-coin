@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-const fetch = require('node-fetch');
+
+// Thêm dòng này để import fetch
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+
 const CryptoJS = require('crypto-js');
 const EC = require('elliptic').ec;
 const readline = require('readline');
@@ -36,7 +39,6 @@ async function sleep(ms) {
 
 // ============== TẠO PRIVATE KEY TỪ MẬT KHẨU ==============
 function generatePrivateKeyFromPassword(password) {
-    // Dùng SHA256 để tạo private key 64 ký tự hex từ mật khẩu
     return CryptoJS.SHA256(password).toString();
 }
 
@@ -49,8 +51,7 @@ async function login(displayAddr, password) {
             body: JSON.stringify({ 
                 displayAddress: displayAddr, 
                 password: password 
-            }),
-            credentials: 'include'
+            })
         });
         
         const data = await response.json();
@@ -228,8 +229,7 @@ async function miningWorker(threadId, minerDisplayAddress, privateKey, difficult
                 const submitRes = await fetch(BASE_URL + '/blocks/submit', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(submitData),
-                    credentials: 'include'
+                    body: JSON.stringify(submitData)
                 });
                 
                 const result = await submitRes.json();
@@ -304,7 +304,6 @@ async function getWalletInfo() {
         process.exit(1);
     }
     
-    // Đăng nhập để kiểm tra thông tin
     console.log('\n🔐 Đang đăng nhập...');
     const loginResult = await login(displayAddr, password);
     
@@ -314,7 +313,6 @@ async function getWalletInfo() {
         process.exit(1);
     }
     
-    // Cấu hình CPU
     await getCpuConfig();
     
     console.log('\nĐộ khó hiện tại của mạng sẽ được lấy từ server.');
@@ -331,7 +329,6 @@ async function getWalletInfo() {
         }
     }
     
-    // Tạo private key từ mật khẩu
     const privateKey = generatePrivateKeyFromPassword(password);
     console.log(`\n🔑 Private key generated: ${privateKey.substring(0, 20)}...`);
     
@@ -346,7 +343,6 @@ async function main() {
     let displayAddr, privateKey, difficultyOverride;
     
     if (process.argv.length >= 4) {
-        // Dùng tham số dòng lệnh (vẫn dùng private key hex)
         displayAddr = process.argv[2];
         privateKey = process.argv[3];
         
@@ -358,7 +354,6 @@ async function main() {
             }
         }
         
-        // Cấu hình CPU mặc định
         await getCpuConfig();
         
         console.log('Sử dụng tham số dòng lệnh...');
@@ -369,7 +364,6 @@ async function main() {
         difficultyOverride = result.difficultyOverride;
     }
     
-    // Khởi tạo stats
     const stats = {
         running: true,
         totalHashes: {},
@@ -379,7 +373,6 @@ async function main() {
         totalReward: 0
     };
     
-    // Xử lý Ctrl+C
     process.on('SIGINT', () => {
         console.log('\n\n🛑 Dừng miner...');
         stats.running = false;
@@ -388,16 +381,13 @@ async function main() {
     
     console.log(`\n🚀 Starting ${miningThreads} mining threads...`);
     
-    // Khởi tạo các thread
     const threads = [];
     for (let i = 0; i < miningThreads; i++) {
         threads.push(miningWorker(i, displayAddr, privateKey, difficultyOverride, stats));
     }
     
-    // Thread báo cáo thống kê
     threads.push(statsReporter(stats));
     
-    // Đợi tất cả thread hoàn thành
     await Promise.all(threads);
 }
 
