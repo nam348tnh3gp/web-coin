@@ -1,5 +1,5 @@
 /*
- * WebCoin ESP8266 Miner
+ * WebCoin ESP8266 Miner - Dùng DSHA1
  * Chạy trên NodeMCU, Wemos D1, ESP-01, v.v.
  */
 
@@ -9,6 +9,7 @@
 #include <ArduinoJson.h>
 #include <BearSSLHelpers.h>
 #include <EEPROM.h>
+#include "DSHA1.h"  // Thêm thư viện DSHA1
 
 // ============== CẤU HÌNH ==============
 const char* WIFI_SSID = "your_wifi_ssid";
@@ -42,106 +43,8 @@ bool running = true;
 // LED indicator
 #define LED_PIN LED_BUILTIN
 
-// ============== SHA1 IMPLEMENTATION ==============
-// (ESP8266 không có thư viện SHA1 chuẩn, tự implement)
-#define SHA1_K0 0x5a827999
-#define SHA1_K20 0x6ed9eba1
-#define SHA1_K40 0x8f1bbcdc
-#define SHA1_K60 0xca62c1d6
-
-uint8_t sha1Result[20];
-
-void sha1(const uint8_t* data, uint32_t len) {
-    uint32_t h0 = 0x67452301;
-    uint32_t h1 = 0xEFCDAB89;
-    uint32_t h2 = 0x98BADCFE;
-    uint32_t h3 = 0x10325476;
-    uint32_t h4 = 0xC3D2E1F0;
-    
-    uint32_t w[80];
-    uint32_t a, b, c, d, e, temp;
-    uint8_t padding[64];
-    uint64_t bitLen = len * 8;
-    uint32_t i, j;
-    
-    // Copy data vào buffer
-    uint8_t buffer[len + 9];
-    memcpy(buffer, data, len);
-    buffer[len] = 0x80;
-    
-    // Thêm padding
-    uint32_t padLen = (len < 56) ? (56 - len - 1) : (64 - (len - 56) - 1);
-    for (i = 0; i < padLen; i++) {
-        buffer[len + 1 + i] = 0;
-    }
-    
-    // Thêm độ dài
-    for (i = 0; i < 8; i++) {
-        buffer[len + 1 + padLen + i] = (bitLen >> (56 - i * 8)) & 0xFF;
-    }
-    
-    uint32_t totalLen = len + 1 + padLen + 8;
-    
-    // Xử lý từng block 64 byte
-    for (uint32_t block = 0; block < totalLen; block += 64) {
-        // Copy vào w[0..15]
-        for (i = 0; i < 16; i++) {
-            w[i] = ((uint32_t)buffer[block + i*4]) << 24;
-            w[i] |= ((uint32_t)buffer[block + i*4 + 1]) << 16;
-            w[i] |= ((uint32_t)buffer[block + i*4 + 2]) << 8;
-            w[i] |= (uint32_t)buffer[block + i*4 + 3];
-        }
-        
-        // Mở rộng lên w[16..79]
-        for (i = 16; i < 80; i++) {
-            w[i] = w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16];
-            w[i] = (w[i] << 1) | (w[i] >> 31);
-        }
-        
-        a = h0; b = h1; c = h2; d = h3; e = h4;
-        
-        for (i = 0; i < 20; i++) {
-            temp = ((a << 5) | (a >> 27)) + ((b & c) | ((~b) & d)) + e + w[i] + SHA1_K0;
-            e = d; d = c; c = (b << 30) | (b >> 2); b = a; a = temp;
-        }
-        
-        for (i = 20; i < 40; i++) {
-            temp = ((a << 5) | (a >> 27)) + (b ^ c ^ d) + e + w[i] + SHA1_K20;
-            e = d; d = c; c = (b << 30) | (b >> 2); b = a; a = temp;
-        }
-        
-        for (i = 40; i < 60; i++) {
-            temp = ((a << 5) | (a >> 27)) + ((b & c) | (b & d) | (c & d)) + e + w[i] + SHA1_K40;
-            e = d; d = c; c = (b << 30) | (b >> 2); b = a; a = temp;
-        }
-        
-        for (i = 60; i < 80; i++) {
-            temp = ((a << 5) | (a >> 27)) + (b ^ c ^ d) + e + w[i] + SHA1_K60;
-            e = d; d = c; c = (b << 30) | (b >> 2); b = a; a = temp;
-        }
-        
-        h0 += a; h1 += b; h2 += c; h3 += d; h4 += e;
-    }
-    
-    // Lưu kết quả
-    for (i = 0; i < 4; i++) {
-        sha1Result[i] = (h0 >> (24 - i*8)) & 0xFF;
-        sha1Result[i+4] = (h1 >> (24 - i*8)) & 0xFF;
-        sha1Result[i+8] = (h2 >> (24 - i*8)) & 0xFF;
-        sha1Result[i+12] = (h3 >> (24 - i*8)) & 0xFF;
-        sha1Result[i+16] = (h4 >> (24 - i*8)) & 0xFF;
-    }
-}
-
-String sha1Hex(const uint8_t* data, uint32_t len) {
-    sha1(data, len);
-    String result = "";
-    for (int i = 0; i < 20; i++) {
-        if (sha1Result[i] < 0x10) result += "0";
-        result += String(sha1Result[i], HEX);
-    }
-    return result;
-}
+// ============== XÓA PHẦN SHA1 CŨ - DÙNG DSHA1 THAY THẾ ==============
+// (Đã xóa toàn bộ hàm sha1, sha1Hex cũ)
 
 // ============== HÀM JSON STRINGIFY GIỐNG JS ==============
 String jsonStringify(JsonVariant obj) {
@@ -183,7 +86,7 @@ String jsonStringify(JsonVariant obj) {
     return "null";
 }
 
-// ============== HÀM HASH GIỐNG JS ==============
+// ============== HÀM HASH DÙNG DSHA1 ==============
 String calculateBlockHash(int height, String prevHash, unsigned long timestamp, JsonArray transactions, unsigned long nonce) {
     // Tạo txString giống JS: join(JSON.stringify)
     String txString = "";
@@ -194,8 +97,20 @@ String calculateBlockHash(int height, String prevHash, unsigned long timestamp, 
     // Tạo data string
     String data = String(height) + prevHash + String(timestamp) + txString + String(nonce);
     
-    // Tính SHA1
-    return sha1Hex((uint8_t*)data.c_str(), data.length());
+    // Dùng DSHA1 để tính hash
+    DSHA1 sha1;
+    sha1.write((const unsigned char*)data.c_str(), data.length());
+    
+    unsigned char hashResult[20];
+    sha1.finalize(hashResult);
+    
+    // Chuyển sang hex string
+    String hash = "";
+    for (int i = 0; i < 20; i++) {
+        if (hashResult[i] < 0x10) hash += "0";
+        hash += String(hashResult[i], HEX);
+    }
+    return hash;
 }
 
 // ============== API FUNCTIONS ==============
@@ -333,7 +248,7 @@ void setup() {
     delay(1000);
     
     Serial.println("\n================================");
-    Serial.println(" WEBCCOIN ESP8266 MINER");
+    Serial.println(" WEBCCOIN ESP8266 MINER (DSHA1)");
     Serial.println("================================");
     
     pinMode(LED_PIN, OUTPUT);
@@ -489,7 +404,7 @@ void mine() {
     }
     
     // Đào 10000 nonce mỗi lần
-    unsigned long nonce = millis() % 10000000; // Nonce random
+    unsigned long nonce = millis() % 10000000;
     unsigned long startLocal = millis();
     unsigned long localHashes = 0;
     
