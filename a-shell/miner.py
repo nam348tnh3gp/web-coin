@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-WebCoin Miner v10.1 - OPTIMIZED
-- Tối ưu hiệu năng gấp 2-3 lần
-- Batch processing 10000 nonce
-- Cache thông tin mạng
-- Giảm số lần gọi API
+WebCoin Miner - Y HỆT JavaScript
+- Copy chính xác từ script.js
+- Dùng JSON.stringify giống hệt
+- KHÔNG nonce 100M
 """
 
 import os
@@ -27,7 +26,7 @@ except:
 
 init(autoreset=True)
 
-VERSION = "10.1"
+VERSION = "12.0"
 SERVER_URL = "https://webcoin-1n9d.onrender.com/api"
 DATA_DIR = "WebCoin-Miner"
 SETTINGS_FILE = "config.ini"
@@ -42,12 +41,12 @@ stats_lock = threading.Lock()
 CPU_CORES = multiprocessing.cpu_count()
 auth_cookie = None
 
-# Cache để giảm API calls
+# Cache
 cached_info = None
 cached_pending = None
 last_info_time = 0
 last_pending_time = 0
-CACHE_TIME = 2  # Giây
+CACHE_TIME = 2
 
 def now():
     return datetime.now()
@@ -64,7 +63,7 @@ def print_color(text, color=Fore.WHITE, bright=False):
     style = Style.BRIGHT if bright else ""
     print(f"{color}{style}{text}{Style.RESET_ALL}")
 
-# ============== API VỚI CACHE ==============
+# ============== API ==============
 def login(wallet, password):
     try:
         data = {"displayAddress": wallet, "password": password}
@@ -127,44 +126,50 @@ def submit_block(height, nonce, hash_value, prev_hash, reward, wallet, cookie, t
     except:
         return False
 
-# ============== HASH CHUẨN (TỐI ƯU) ==============
-def json_stringify(obj):
+# ============== JSON STRINGIFY GIỐNG JS ==============
+def json_stringify_js(obj):
+    """Y hệt JSON.stringify trong JavaScript"""
     if obj is None:
         return "null"
-    elif isinstance(obj, str):
-        return f'"{obj}"'
-    elif isinstance(obj, (int, float)):
-        return str(obj)
     elif isinstance(obj, bool):
         return "true" if obj else "false"
+    elif isinstance(obj, (int, float)):
+        return str(obj)
+    elif isinstance(obj, str):
+        return f'"{obj}"'
+    elif isinstance(obj, list):
+        items = [json_stringify_js(item) for item in obj]
+        return "[" + ",".join(items) + "]"
     elif isinstance(obj, dict):
         items = []
         for k, v in obj.items():
-            items.append(f'"{k}":{json_stringify(v)}')
+            items.append(f'"{k}":{json_stringify_js(v)}')
         return "{" + ",".join(items) + "}"
-    elif isinstance(obj, list):
-        items = [json_stringify(item) for item in obj]
-        return "[" + ",".join(items) + "]"
     return json.dumps(obj, separators=(',', ':'))
 
-def calculate_block_hash(height, prev_hash, timestamp, transactions, nonce):
-    # Tối ưu: tạo tx_string một lần rồi cache
-    tx_string = ''.join([json_stringify(tx) for tx in transactions])
+# ============== HASH GIỐNG HỆT JS ==============
+def calculate_block_hash_js(height, prev_hash, timestamp, transactions, nonce):
+    """
+    Copy chính xác từ script.js:
+    const txString = block.transactions.map(tx => JSON.stringify(tx)).join('');
+    CryptoJS.SHA1(block.height + block.previousHash + block.timestamp + txString + block.nonce).toString();
+    """
+    tx_string = ''.join([json_stringify_js(tx) for tx in transactions])
     data = f"{height}{prev_hash}{timestamp}{tx_string}{nonce}"
     return hashlib.sha1(data.encode()).hexdigest()
 
-# ============== MINING THREAD TỐI ƯU ==============
+# ============== MINING THREAD ==============
 def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, cookie):
     global total_hashes, blocks_mined, total_reward, running
 
     print_color(f"🧵 Thread {thread_id} started", Fore.CYAN)
     
-    # Batch size lớn để tăng tốc
+    # Range nonce NHỎ để nhanh tìm thấy (0-5M)
+    MAX_NONCE = 5000000
     BATCH_SIZE = 10000
-    
+
     while running:
         try:
-            # Lấy thông tin block (có cache)
             info = get_network_info()
             if not info or not info.get('latestBlock'):
                 time.sleep(0.1)
@@ -181,52 +186,50 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
             prev_hash = latest['hash']
             public_key = wallet[2:]
 
-            # Range lớn hơn cho mỗi thread (100M)
-            range_size = 100000000
-            start_nonce = thread_id * range_size
-            end_nonce = (thread_id + 1) * range_size
-            nonce = start_nonce
-            
-            # Lấy pending (có cache)
+            # Lấy pending
             pending = get_pending()
             
-            if thread_id == 0:
-                print_color(f"📦 Block #{height} - {len(pending)} pending - Target: {target}", Fore.YELLOW)
-            
-            start_local = time.time()
-            local_hashes = 0
-            
-            # Cố định timestamp cho block này để tránh thay đổi
-            base_timestamp = int(time.time() * 1000)
+            # TIMESTAMP CỐ ĐỊNH (giống web)
+            timestamp = int(time.time() * 1000)
             
             coinbase = {
                 "from": None,
                 "to": public_key,
                 "amount": base_reward,
-                "timestamp": base_timestamp,
+                "timestamp": timestamp,
                 "signature": None
             }
             
             transactions = [coinbase] + pending
+
+            if thread_id == 0:
+                print_color(f"\n📦 Block #{height} - {len(pending)} pending - Target: {target}", Fore.YELLOW)
+                print_color(f"   Timestamp: {timestamp}", Fore.CYAN)
+
+            # Mỗi thread range riêng, nhưng NHỎ
+            start_nonce = thread_id * MAX_NONCE
+            end_nonce = (thread_id + 1) * MAX_NONCE
+            nonce = start_nonce
             
-            # Cache tx_string để tăng tốc
-            tx_string = ''.join([json_stringify(tx) for tx in transactions])
+            start_local = time.time()
+            local_hashes = 0
+            found = False
             
-            while running and nonce < end_nonce:
-                # Xử lý theo batch
+            while running and nonce < end_nonce and not found:
                 batch_end = min(nonce + BATCH_SIZE, end_nonce)
                 
                 for n in range(nonce, batch_end):
-                    data = f"{height}{prev_hash}{base_timestamp}{tx_string}{n}"
-                    hash_value = hashlib.sha1(data.encode()).hexdigest()
+                    hash_value = calculate_block_hash_js(height, prev_hash, timestamp, transactions, n)
                     local_hashes += 1
                     
                     if hash_value.startswith(target):
+                        found = True
                         elapsed = time.time() - start_local
                         speed = local_hashes / elapsed if elapsed > 0 else 0
                         
                         print_color(f"\n🎯 Thread {thread_id}: Found nonce {n}", Fore.GREEN)
                         print_color(f"   Speed: {speed/1000:.1f} kH/s", Fore.CYAN)
+                        print_color(f"   Hash: {hash_value[:30]}...", Fore.CYAN)
 
                         if thread_id == 0 and cookie:
                             if submit_block(height, n, hash_value, prev_hash, base_reward, wallet, cookie, transactions):
@@ -237,37 +240,18 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
                             else:
                                 print_color(f"❌❌❌ Block #{height} REJECTED! ❌❌❌", Fore.RED)
                         
-                        # Thoát để lấy block mới
                         break
                 
                 nonce = batch_end
                 
-                # Cập nhật hashrate
                 with stats_lock:
-                    total_hashes += (batch_end - nonce) if 'n' in locals() else BATCH_SIZE
+                    total_hashes += (batch_end - nonce) if not found else BATCH_SIZE
                 
-                # Điều chỉnh CPU nếu cần
+                # Điều chỉnh CPU
                 if target_cpu_percent < 100 and HAS_PSUTIL:
                     cpu_percent = psutil.cpu_percent()
                     if cpu_percent > target_cpu_percent + 10:
                         time.sleep(0.001)
-                
-                # Kiểm tra pending mới mỗi 1M nonce
-                if nonce % 1000000 == 0:
-                    new_pending = get_pending()
-                    if len(new_pending) != len(pending):
-                        print_color(f"⚠️ Pending changed from {len(pending)} to {len(new_pending)}", Fore.YELLOW)
-                        pending = new_pending
-                        # Cập nhật lại transactions
-                        coinbase = {
-                            "from": None,
-                            "to": public_key,
-                            "amount": base_reward,
-                            "timestamp": base_timestamp,
-                            "signature": None
-                        }
-                        transactions = [coinbase] + pending
-                        tx_string = ''.join([json_stringify(tx) for tx in transactions])
 
         except Exception as e:
             print_color(f"Thread {thread_id} error: {e}", Fore.RED)
@@ -345,7 +329,7 @@ def main():
     global running, start_time, auth_cookie
 
     print_color("\n" + "="*70, Fore.MAGENTA, bright=True)
-    print_color(" WEBCCOIN MINER v10.1 - OPTIMIZED", Fore.MAGENTA, bright=True)
+    print_color(" WEBCCOIN MINER v12.0 - Y HỆT JAVASCRIPT", Fore.MAGENTA, bright=True)
     print_color("="*70, Fore.MAGENTA, bright=True)
 
     config = load_config()
@@ -386,6 +370,10 @@ def main():
         return
     auth_cookie = cookie
     print_color(f"✅ Đăng nhập thành công!", Fore.GREEN)
+
+    info = get_network_info(force=True)
+    if info:
+        print_color(f"\n📡 Network: diff={info.get('difficulty')}, reward={info.get('reward')} WBC", Fore.CYAN)
 
     print_color(f"\n🚀 Bắt đầu đào {threads} luồng, {cpu_percent}% CPU", Fore.GREEN)
     print_color("="*70, Fore.MAGENTA)
