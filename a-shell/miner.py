@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-WebCoin Miner v5.0 - CÓ PENDING TRANSACTIONS
+WebCoin Miner v6.0 - CHUẨN 100% THEO WEB
 """
 
 import os
@@ -23,7 +23,7 @@ except:
 
 init(autoreset=True)
 
-VERSION = "5.0"
+VERSION = "6.0"
 SERVER_URL = "https://webcoin-1n9d.onrender.com/api"
 DATA_DIR = "WebCoin-Miner"
 SETTINGS_FILE = "config.ini"
@@ -88,7 +88,6 @@ def get_network_info(force=False):
     return cached_info
 
 def get_pending():
-    """Lấy pending transactions từ server"""
     global cached_pending
     try:
         resp = requests.get(f"{SERVER_URL}/pending", timeout=SOC_TIMEOUT)
@@ -114,13 +113,16 @@ def submit_block(height, nonce, hash_value, prev_hash, reward, wallet, cookie, t
         headers["Cookie"] = cookie
     try:
         resp = requests.post(f"{SERVER_URL}/blocks/submit", json=data, headers=headers, timeout=SOC_TIMEOUT)
-        return resp.status_code == 200
+        if resp.status_code == 200:
+            result = resp.json()
+            return "error" not in result
+        return False
     except:
         return False
 
 # ============== HASH CHUẨN ==============
 def calculate_block_hash(height, prev_hash, timestamp, transactions, nonce):
-    """Tính hash giống hệt web - có pending transactions"""
+    """Tính hash giống hệt web"""
     tx_string = ''.join([json.dumps(tx, separators=(',', ':')) for tx in transactions])
     data = f"{height}{prev_hash}{timestamp}{tx_string}{nonce}"
     return hashlib.sha1(data.encode()).hexdigest()
@@ -131,7 +133,6 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
 
     print_color(f"🧵 Thread {thread_id} started", Fore.CYAN)
     batch_size = 5000
-    nonce_base = thread_id * 10000000
 
     while running:
         try:
@@ -140,7 +141,6 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
                 time.sleep(0.1)
                 continue
 
-            # Lấy pending transactions
             pending = get_pending()
             
             latest = info['latestBlock']
@@ -150,9 +150,9 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
             difficulty = difficulty_override if difficulty_override else network_diff
             target = "0" * difficulty
 
+            # TIMESTAMP PHẢI LÀ CỦA BLOCK MỚI, không phải time hiện tại
             timestamp = int(time.time() * 1000)
             
-            # Tạo coinbase transaction
             public_key = wallet[2:]
             coinbase = {
                 "from": None,
@@ -162,7 +162,6 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
                 "signature": None
             }
             
-            # Transactions = coinbase + pending (giống web)
             transactions = [coinbase] + pending
             
             height = latest['height'] + 1
@@ -170,41 +169,39 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
 
             start_local = time.time()
             local_hashes = 0
+            nonce = thread_id * 10000000  # Mỗi thread range riêng
             
-            for batch_start in range(nonce_base, nonce_base + 20000000, batch_size):
-                if not running:
+            while running and nonce < (thread_id + 1) * 10000000:
+                hash_value = calculate_block_hash(height, prev_hash, timestamp, transactions, nonce)
+                local_hashes += 1
+                
+                if hash_value.startswith(target):
+                    elapsed = time.time() - start_local
+                    speed = local_hashes / elapsed if elapsed > 0 else 0
+                    
+                    print_color(f"\n🎯 Thread {thread_id}: Found nonce {nonce} in {elapsed:.1f}s ({speed/1000:.1f} kH/s)", Fore.GREEN)
+                    print_color(f"   Hash: {hash_value}", Fore.CYAN)
+
+                    if thread_id == 0 and cookie:
+                        if submit_block(height, nonce, hash_value, prev_hash, reward, wallet, cookie, transactions):
+                            with stats_lock:
+                                blocks_mined += 1
+                                total_reward += reward
+                            print_color(f"✅ Block #{height} ACCEPTED! +{reward} WBC", Fore.GREEN)
+                        else:
+                            print_color(f"❌ Block #{height} REJECTED!", Fore.RED)
+                    
+                    # Sau khi tìm thấy nonce, thoát để lấy block mới
                     break
-
-                batch_end = min(batch_start + batch_size, nonce_base + 20000000)
                 
-                for nonce in range(batch_start, batch_end):
-                    hash_value = calculate_block_hash(height, prev_hash, timestamp, transactions, nonce)
-                    local_hashes += 1
-                    
-                    if hash_value.startswith(target):
-                        elapsed = time.time() - start_local
-                        speed = local_hashes / elapsed if elapsed > 0 else 0
-                        
-                        print_color(f"\n🎯 Thread {thread_id}: Found nonce {nonce} in {elapsed:.1f}s ({speed/1000:.1f} kH/s)", Fore.GREEN)
-                        print_color(f"   Hash: {hash_value}", Fore.CYAN)
-
-                        if thread_id == 0 and cookie:
-                            if submit_block(height, nonce, hash_value, prev_hash, reward, wallet, cookie, transactions):
-                                with stats_lock:
-                                    blocks_mined += 1
-                                    total_reward += reward
-                                print_color(f"✅ Block #{height} ACCEPTED! +{reward} WBC", Fore.GREEN)
-                            else:
-                                print_color(f"❌ Block #{height} REJECTED!", Fore.RED)
-                        
-                        # Sau khi tìm thấy nonce, thoát để lấy block mới
-                        break
-                    
-                with stats_lock:
-                    total_hashes += (batch_end - batch_start)
+                nonce += 1
                 
-                if target_cpu_percent < 100:
-                    time.sleep(0.0005)
+                if nonce % 10000 == 0:
+                    with stats_lock:
+                        total_hashes += 10000
+                    
+                    if target_cpu_percent < 100:
+                        time.sleep(0.0005)
 
         except Exception as e:
             print_color(f"Thread {thread_id} error: {e}", Fore.RED)
@@ -284,7 +281,7 @@ def main():
     global running, start_time, auth_cookie
 
     print_color("\n" + "="*60, Fore.MAGENTA, bright=True)
-    print_color(" WEBCCOIN MINER v5.0 - CÓ PENDING", Fore.MAGENTA, bright=True)
+    print_color(" WEBCCOIN MINER v6.0 - CHUẨN 100%", Fore.MAGENTA, bright=True)
     print_color("="*60, Fore.MAGENTA, bright=True)
 
     config = load_config()
