@@ -1,5 +1,5 @@
 /*
- * WebCoin ESP8266 Miner - Dùng DSHA1
+ * ESP8266miner fixed
  * Chạy trên NodeMCU, Wemos D1, ESP-01, v.v.
  */
 
@@ -9,95 +9,66 @@
 #include <ArduinoJson.h>
 #include <BearSSLHelpers.h>
 #include <EEPROM.h>
-#include "DSHA1.h"  // Thêm thư viện DSHA1
+#include "DSHA1.h"
+#include <time.h>  // Thêm cho NTP
 
 // ============== CẤU HÌNH ==============
-const char* WIFI_SSID = "your_wifi_ssid";
-const char* WIFI_PASS = "your_wifi_password";
+const char* WIFI_SSID = "your_wifi_ssid";        // Đã sửa: thêm dấu "
+const char* WIFI_PASS = "your_wifi_password";    // Đã sửa: thêm dấu "
 const char* SERVER_URL = "https://webcoin-1n9d.onrender.com/api";
 const int SOC_TIMEOUT = 10;
 
 // Cấu hình EEPROM
 #define EEPROM_SIZE 512
-#define CONFIG_VERSION 0x01
+#define CONFIG_VERSION 0x02  // Tăng version
 
 // ============== CẤU TRÚC LƯU CONFIG ==============
 struct Config {
     uint8_t version;
     char wallet[100];
     char password[64];
-    uint8_t threads;
+    char publicKey[256];      // Thêm publicKey
+    uint8_t threads;           // ESP8266 chỉ có 1 core, nhưng giữ để tương thích
     uint8_t cpuPercent;
-    uint8_t difficulty; // 0 = auto
+    uint8_t difficulty;        // 0 = auto
 } config;
 
 // ============== BIẾN TOÀN CỤC ==============
 WiFiClientSecure client;
 String authCookie = "";
-unsigned long totalHashes = 0;
-int blocksMined = 0;
-int totalReward = 0;
+volatile unsigned long totalHashes = 0;
+volatile int blocksMined = 0;
+volatile int totalReward = 0;
 unsigned long startTime = 0;
 bool running = true;
 
 // LED indicator
 #define LED_PIN LED_BUILTIN
 
-// ============== XÓA PHẦN SHA1 CŨ - DÙNG DSHA1 THAY THẾ ==============
-// (Đã xóa toàn bộ hàm sha1, sha1Hex cũ)
-
-// ============== HÀM JSON STRINGIFY GIỐNG JS ==============
-String jsonStringify(JsonVariant obj) {
-    if (obj.is<const char*>()) {
-        return "\"" + String(obj.as<const char*>()) + "\"";
+// Hàm tạo dòng kẻ
+String createLine(int length, char c = '=') {
+    String line = "";
+    for (int i = 0; i < length; i++) {
+        line += c;
     }
-    if (obj.is<String>()) {
-        return "\"" + obj.as<String>() + "\"";
-    }
-    if (obj.is<int>() || obj.is<long>() || obj.is<double>()) {
-        return String(obj.as<double>());
-    }
-    if (obj.is<bool>()) {
-        return obj.as<bool>() ? "true" : "false";
-    }
-    if (obj.is<JsonArray>()) {
-        JsonArray arr = obj.as<JsonArray>();
-        String result = "[";
-        for (size_t i = 0; i < arr.size(); i++) {
-            if (i > 0) result += ",";
-            result += jsonStringify(arr.get(i));
-        }
-        result += "]";
-        return result;
-    }
-    if (obj.is<JsonObject>()) {
-        JsonObject obj2 = obj.as<JsonObject>();
-        String result = "{";
-        bool first = true;
-        for (JsonPair kv : obj2) {
-            if (!first) result += ",";
-            first = false;
-            result += "\"" + String(kv.key().c_str()) + "\":";
-            result += jsonStringify(kv.value());
-        }
-        result += "}";
-        return result;
-    }
-    return "null";
+    return line;
 }
 
 // ============== HÀM HASH DÙNG DSHA1 ==============
 String calculateBlockHash(int height, String prevHash, unsigned long timestamp, JsonArray transactions, unsigned long nonce) {
-    // Tạo txString giống JS: join(JSON.stringify)
+    // Tạo txString giống JS: JSON.stringify(tx) và join('')
     String txString = "";
     for (size_t i = 0; i < transactions.size(); i++) {
-        txString += jsonStringify(transactions.get(i));
+        // Serialize từng transaction thành JSON string
+        String txJson;
+        serializeJson(transactions[i], txJson);
+        txString += txJson;
     }
     
-    // Tạo data string
+    // Tạo data string giống JS: height + prevHash + timestamp + txString + nonce
     String data = String(height) + prevHash + String(timestamp) + txString + String(nonce);
     
-    // Dùng DSHA1 để tính hash
+    // Dùng DSHA1 để tính hash (giống CryptoJS.SHA1)
     DSHA1 sha1;
     sha1.write((const unsigned char*)data.c_str(), data.length());
     
@@ -110,6 +81,8 @@ String calculateBlockHash(int height, String prevHash, unsigned long timestamp, 
         if (hashResult[i] < 0x10) hash += "0";
         hash += String(hashResult[i], HEX);
     }
+    // Chuyển thành chữ thường cho giống JS
+    hash.toLowerCase();
     return hash;
 }
 
@@ -126,10 +99,16 @@ bool login(String wallet, String password) {
     
     if (httpCode == 200) {
         String response = http.getString();
-        DynamicJsonDocument doc(1024);
+        DynamicJsonDocument doc(2048);
         deserializeJson(doc, response);
         
         if (!doc.containsKey("error")) {
+            // Lưu publicKey từ response
+            if (doc.containsKey("publicKey")) {
+                String pubKey = doc["publicKey"].as<String>();
+                strcpy(config.publicKey, pubKey.c_str());
+            }
+            
             // Lấy cookie từ header
             String cookie = http.header("Set-Cookie");
             if (cookie.length() > 0) {
@@ -159,7 +138,7 @@ DynamicJsonDocument* getNetworkInfo() {
     int httpCode = http.GET();
     if (httpCode == 200) {
         String response = http.getString();
-        DynamicJsonDocument* doc = new DynamicJsonDocument(2048);
+        DynamicJsonDocument* doc = new DynamicJsonDocument(4096);
         deserializeJson(*doc, response);
         http.end();
         return doc;
@@ -179,7 +158,7 @@ DynamicJsonDocument* getPending() {
     int httpCode = http.GET();
     if (httpCode == 200) {
         String response = http.getString();
-        DynamicJsonDocument* doc = new DynamicJsonDocument(8192);
+        DynamicJsonDocument* doc = new DynamicJsonDocument(16384);
         deserializeJson(*doc, response);
         http.end();
         return doc;
@@ -196,27 +175,37 @@ bool submitBlock(int height, unsigned long nonce, String hash, String prevHash, 
         http.addHeader("Cookie", authCookie);
     }
     
-    // Tạo payload
-    DynamicJsonDocument doc(8192);
+    // Tạo payload giống JS
+    DynamicJsonDocument doc(16384);
     doc["height"] = height;
     doc["previousHash"] = prevHash;
-    doc["timestamp"] = millis();
+    doc["timestamp"] = (unsigned long)time(nullptr) * 1000;  // Dùng NTP time
     doc["nonce"] = nonce;
     doc["hash"] = hash;
     doc["minerAddress"] = String(config.wallet);
     
+    // Thêm transactions array
     JsonArray txs = doc.createNestedArray("transactions");
     for (size_t i = 0; i < transactions.size(); i++) {
-        txs.add(transactions.get(i));
+        txs.add(transactions[i]);
     }
     
     String payload;
     serializeJson(doc, payload);
     
+    Serial.printf("📤 Submitting block #%d with %d transactions\n", height, transactions.size());
+    
     int httpCode = http.POST(payload);
+    String response = http.getString();
     http.end();
     
-    return httpCode == 200;
+    if (httpCode == 200) {
+        Serial.println("✅ Block accepted!");
+        return true;
+    } else {
+        Serial.printf("❌ Block rejected: HTTP %d - %s\n", httpCode, response.c_str());
+        return false;
+    }
 }
 
 // ============== LƯU/ĐỌC CONFIG ==============
@@ -235,6 +224,7 @@ void loadConfig() {
         config.version = CONFIG_VERSION;
         strcpy(config.wallet, "");
         strcpy(config.password, "");
+        strcpy(config.publicKey, "");
         config.threads = 1;
         config.cpuPercent = 100;
         config.difficulty = 0;
@@ -247,9 +237,10 @@ void setup() {
     Serial.begin(115200);
     delay(1000);
     
-    Serial.println("\n================================");
-    Serial.println(" WEBCCOIN ESP8266 MINER (DSHA1)");
-    Serial.println("================================");
+    String line = createLine(60);
+    Serial.println("\n" + line);
+    Serial.println(" WEBCCOIN ESP8266 MINER - FULL COMPATIBLE");
+    Serial.println(createLine(59));
     
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, HIGH);
@@ -265,9 +256,6 @@ void setup() {
         while (!Serial.available());
         String input = Serial.readStringUntil('\n');
         input.trim();
-        if (!input.startsWith("W_")) {
-            input = "W_" + input;
-        }
         strcpy(config.wallet, input.c_str());
         
         Serial.print("Mật khẩu ví: ");
@@ -282,24 +270,50 @@ void setup() {
         config.difficulty = input.toInt();
         if (config.difficulty > 4) config.difficulty = 0;
         
-        // Lưu config
-        saveConfig();
-        Serial.println("✅ Config saved");
+        Serial.println("\n🔑 Đang đăng nhập để lấy publicKey...");
+        
+        // Kết nối WiFi trước khi đăng nhập
+        WiFi.begin(WIFI_SSID, WIFI_PASS);
+        int attempts = 0;
+        while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+            delay(500);
+            Serial.print(".");
+            attempts++;
+        }
+        
+        if (WiFi.status() == WL_CONNECTED) {
+            // Đăng nhập để lấy publicKey
+            if (login(config.wallet, config.password)) {
+                Serial.println("\n✅ Đăng nhập thành công, đã lấy publicKey");
+                // Lưu config
+                saveConfig();
+                Serial.println("✅ Config saved");
+            } else {
+                Serial.println("\n❌ Đăng nhập thất bại! Kiểm tra lại thông tin.");
+                return;
+            }
+        } else {
+            Serial.println("\n❌ WiFi failed!");
+            return;
+        }
     }
     
-    Serial.printf("\n📊 Wallet: %s...\n", String(config.wallet).substring(0, 20).c_str());
+    Serial.printf("\n📊 Wallet: %s\n", config.wallet);
+    Serial.printf("   PublicKey: %s...\n", String(config.publicKey).substring(0, 30).c_str());
     Serial.printf("   Difficulty: %s\n", config.difficulty == 0 ? "Auto" : String(config.difficulty).c_str());
     
     // Kết nối WiFi
-    Serial.printf("\n📡 Connecting to %s", WIFI_SSID);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
-    
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-        delay(500);
-        Serial.print(".");
-        digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-        attempts++;
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.printf("\n📡 Connecting to %s", WIFI_SSID);
+        WiFi.begin(WIFI_SSID, WIFI_PASS);
+        
+        int attempts = 0;
+        while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+            delay(500);
+            Serial.print(".");
+            digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+            attempts++;
+        }
     }
     
     if (WiFi.status() == WL_CONNECTED) {
@@ -311,27 +325,51 @@ void setup() {
         return;
     }
     
-    // Đăng nhập
-    Serial.print("\n🔐 Logging in... ");
-    if (login(config.wallet, config.password)) {
-        Serial.println("✅ Success!");
+    // Đồng bộ thời gian NTP (cho timestamp giống JS)
+    Serial.print("\n🕒 Syncing NTP...");
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    time_t now = time(nullptr);
+    while (now < 100000) {
+        delay(500);
+        Serial.print(".");
+        now = time(nullptr);
+    }
+    Serial.printf("\n✅ Time synced: %s", ctime(&now));
+    
+    // Đăng nhập nếu chưa có publicKey
+    if (strlen(config.publicKey) == 0) {
+        Serial.print("\n🔐 Logging in... ");
+        if (login(config.wallet, config.password)) {
+            Serial.println("✅ Success!");
+            saveConfig();
+        } else {
+            Serial.println("❌ Failed!");
+            return;
+        }
     } else {
-        Serial.println("❌ Failed!");
-        return;
+        // Đăng nhập để lấy cookie
+        Serial.print("\n🔐 Logging in... ");
+        if (login(config.wallet, config.password)) {
+            Serial.println("✅ Success!");
+        } else {
+            Serial.println("❌ Failed!");
+            return;
+        }
     }
     
     // Lấy thông tin mạng
     DynamicJsonDocument* info = getNetworkInfo();
     if (info) {
-        Serial.printf("📡 Network: diff=%d, reward=%d WBC\n", 
+        Serial.printf("📡 Network: diff=%d, reward=%d WBC, pending=%d\n", 
                      (*info)["difficulty"].as<int>(), 
-                     (*info)["reward"].as<int>());
+                     (*info)["reward"].as<int>(),
+                     (*info)["pendingCount"].as<int>());
         delete info;
     }
     
     // Bắt đầu đào
     Serial.println("\n🚀 Starting miner...");
-    Serial.println("================================");
+    Serial.println(createLine(59));
     
     startTime = millis();
 }
@@ -343,11 +381,11 @@ void mine() {
     static String prevHash = "";
     static int targetDiff = 0;
     static String target = "";
-    static JsonArray pending;
+    static int baseReward = 0;
     static DynamicJsonDocument* pendingDoc = nullptr;
     static unsigned long timestamp = 0;
-    static DynamicJsonDocument coinbaseDoc(256);
-    static DynamicJsonDocument transactionsDoc(8192);
+    static DynamicJsonDocument coinbaseDoc(512);
+    static DynamicJsonDocument transactionsDoc(16384);
     static JsonArray transactions;
     
     // Lấy thông tin mạng mỗi 30 giây
@@ -359,7 +397,7 @@ void mine() {
             prevHash = latest["hash"].as<String>();
             
             int networkDiff = (*info)["difficulty"] | 3;
-            int baseReward = (*info)["reward"] | 48;
+            baseReward = (*info)["reward"] | 48;
             
             targetDiff = config.difficulty > 0 ? config.difficulty : networkDiff;
             target = "";
@@ -368,16 +406,16 @@ void mine() {
             // Lấy pending
             if (pendingDoc) delete pendingDoc;
             pendingDoc = getPending();
-            pending = pendingDoc ? pendingDoc->as<JsonArray>() : JsonArray();
+            JsonArray pending = pendingDoc ? pendingDoc->as<JsonArray>() : JsonArray();
             
-            // Tạo timestamp
-            timestamp = millis();
+            // Lấy thời gian thực
+            time_t now = time(nullptr);
+            timestamp = (unsigned long)now * 1000;
             
-            // Tạo coinbase transaction
-            String publicKey = String(config.wallet).substring(2);
+            // Tạo coinbase transaction - DÙNG PUBLICKEY GỐC
             coinbaseDoc.clear();
             coinbaseDoc["from"] = nullptr;
-            coinbaseDoc["to"] = publicKey;
+            coinbaseDoc["to"] = config.publicKey;  // Dùng publicKey gốc
             coinbaseDoc["amount"] = baseReward;
             coinbaseDoc["timestamp"] = timestamp;
             coinbaseDoc["signature"] = nullptr;
@@ -386,16 +424,26 @@ void mine() {
             transactionsDoc.clear();
             transactions = transactionsDoc.to<JsonArray>();
             transactions.add(coinbaseDoc.as<JsonVariant>());
+            
+            // Thêm pending transactions
             for (size_t i = 0; i < pending.size(); i++) {
-                transactions.add(pending[i]);
+                JsonObject pendingTx = pending[i];
+                DynamicJsonDocument txDoc(512);
+                txDoc["from"] = pendingTx["from"].as<String>();
+                txDoc["to"] = pendingTx["to"].as<String>();
+                txDoc["amount"] = pendingTx["amount"].as<int>();
+                txDoc["timestamp"] = pendingTx["timestamp"].as<unsigned long>();
+                txDoc["signature"] = pendingTx["signature"].as<String>();
+                transactions.add(txDoc.as<JsonVariant>());
             }
             
-            Serial.printf("\n📦 Block #%d - %d pending - Target: %s\n", 
-                         currentHeight, pending.size(), target.c_str());
+            Serial.printf("\n📦 Block #%d - %d pending - Target: %s (difficulty: %d)\n", 
+                         currentHeight, pending.size(), target.c_str(), targetDiff);
             
             lastInfoTime = millis();
+        } else {
+            delete info;
         }
-        delete info;
     }
     
     if (currentHeight == 0) {
@@ -403,39 +451,57 @@ void mine() {
         return;
     }
     
-    // Đào 10000 nonce mỗi lần
-    unsigned long nonce = millis() % 10000000;
+    // Đào nonce
+    static unsigned long nonce = 0;
     unsigned long startLocal = millis();
     unsigned long localHashes = 0;
+    bool found = false;
     
-    for (int i = 0; i < 10000; i++) {
-        String hash = calculateBlockHash(currentHeight, prevHash, timestamp, transactions, nonce + i);
+    // Đào 10000 nonce mỗi lần
+    for (int i = 0; i < 10000 && !found; i++) {
+        // Cập nhật timestamp mỗi 1000 nonce
+        if (nonce % 1000 == 0) {
+            time_t now = time(nullptr);
+            timestamp = (unsigned long)now * 1000;
+            coinbaseDoc["timestamp"] = timestamp;
+            transactions[0] = coinbaseDoc.as<JsonVariant>();
+        }
+        
+        String hash = calculateBlockHash(currentHeight, prevHash, timestamp, transactions, nonce);
         localHashes++;
+        
+        // Cập nhật tổng hash (cần atomic vì có thể bị ngắt)
+        noInterrupts();
         totalHashes++;
+        interrupts();
         
         if (hash.startsWith(target)) {
+            found = true;
             unsigned long elapsed = (millis() - startLocal) / 1000;
             float speed = localHashes / (elapsed > 0 ? elapsed : 1);
             
-            Serial.printf("\n🎯 Found nonce %lu\n", nonce + i);
-            Serial.printf("   Speed: %.1f kH/s\n", speed/1000);
-            Serial.printf("   Hash: %s\n", hash.substring(0, 30).c_str());
+            Serial.printf("\n🎯 Found nonce %lu\n", nonce);
+            Serial.printf("   Speed: %.2f H/s\n", speed);
+            Serial.printf("   Hash: %s\n", hash.c_str());
             
-            if (submitBlock(currentHeight, nonce + i, hash, prevHash, 
-                           (*coinbaseDoc.as<JsonObject>())["amount"].as<int>(), 
-                           transactions)) {
+            if (submitBlock(currentHeight, nonce, hash, prevHash, baseReward, transactions)) {
                 blocksMined++;
-                totalReward += (*coinbaseDoc.as<JsonObject>())["amount"].as<int>();
-                Serial.printf("✅✅✅ Block #%d ACCEPTED! +%d WBC ✅✅✅\n", 
-                             currentHeight, (*coinbaseDoc.as<JsonObject>())["amount"].as<int>());
+                totalReward += baseReward;
+                Serial.printf("✅✅✅ Block #%d ACCEPTED! +%d WBC ✅✅✅\n", currentHeight, baseReward);
             } else {
                 Serial.printf("❌❌❌ Block #%d REJECTED! ❌❌❌\n", currentHeight);
             }
             
-            // Reset để lấy block mới
+            // Reset để đào block mới
             currentHeight = 0;
+            nonce = 0;
             break;
         }
+        
+        nonce++;
+        
+        // Tránh overflow
+        if (nonce >= 0xFFFFFFFF) nonce = 0;
     }
     
     // Điều chỉnh CPU (ESP8266 chỉ có 1 core)
@@ -450,21 +516,30 @@ void loop() {
     static unsigned long lastHashes = 0;
     static unsigned long lastTime = millis();
     
-    mine();
+    if (running) {
+        mine();
+    }
     
     // Thống kê mỗi 10 giây
     if (millis() - lastStats > 10000) {
         unsigned long now = millis();
         unsigned long elapsed = (now - startTime) / 1000;
         
-        float speed = (totalHashes - lastHashes) / ((now - lastTime) / 1000.0);
+        // Tính speed an toàn (tránh chia 0)
+        float speed = 0;
+        unsigned long timeDiff = (now - lastTime);
+        if (timeDiff > 0) {
+            speed = (totalHashes - lastHashes) / (timeDiff / 1000.0);
+        }
         
         Serial.printf("\n📊 STATS [%lum %lus]\n", elapsed / 60, elapsed % 60);
-        Serial.printf("   📈 Hashes: %lu | Speed: %.2f kH/s\n", totalHashes, speed/1000);
+        Serial.printf("   📈 Hashes: %lu | Speed: %.2f H/s\n", totalHashes, speed);
         Serial.printf("   ⛏️  Blocks: %d | Reward: %d WBC\n", blocksMined, totalReward);
         
-        // Nhấp nháy LED
-        digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+        // Nhấp nháy LED theo tốc độ
+        if (speed > 0) {
+            digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+        }
         
         lastHashes = totalHashes;
         lastTime = now;
