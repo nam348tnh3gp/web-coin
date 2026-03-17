@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-WebCoin Miner v10.0 - PENDING CHO MỖI NONCE
+WebCoin Miner v11.0 - FINAL WORKING VERSION
 """
 
 import os
@@ -23,7 +23,7 @@ except:
 
 init(autoreset=True)
 
-VERSION = "10.0"
+VERSION = "11.0"
 SERVER_URL = "https://webcoin-1n9d.onrender.com/api"
 DATA_DIR = "WebCoin-Miner"
 SETTINGS_FILE = "config.ini"
@@ -137,7 +137,6 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
 
     while running:
         try:
-            # Lấy thông tin block hiện tại
             info = get_network_info()
             if not info or not info.get('latestBlock'):
                 time.sleep(0.1)
@@ -154,20 +153,18 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
             prev_hash = latest['hash']
             public_key = wallet[2:]
 
-            # Nonce range cho thread này
             start_nonce = thread_id * 20000000
             end_nonce = (thread_id + 1) * 20000000
             nonce = start_nonce
             
-            # Lấy pending transactions cho block này
             pending = get_pending()
-            print_color(f"📦 Block #{height} - {len(pending)} pending transactions", Fore.YELLOW)
+            print_color(f"\n📦 Block #{height} - Độ khó {difficulty} - {len(pending)} pending", Fore.YELLOW)
             
             start_local = time.time()
             local_hashes = 0
+            found = False
             
-            while running and nonce < end_nonce:
-                # Tạo timestamp mới cho mỗi lần thử (giống web)
+            while running and nonce < end_nonce and not found:
                 timestamp = int(time.time() * 1000)
                 
                 coinbase = {
@@ -179,7 +176,6 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
                 }
                 
                 transactions = [coinbase] + pending
-                
                 hash_value = calculate_block_hash(height, prev_hash, timestamp, transactions, nonce)
                 local_hashes += 1
                 
@@ -187,10 +183,9 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
                     elapsed = time.time() - start_local
                     speed = local_hashes / elapsed if elapsed > 0 else 0
                     
-                    print_color(f"\n🎯 Thread {thread_id}: Found nonce {nonce} in {elapsed:.1f}s ({speed/1000:.1f} kH/s)", Fore.GREEN)
+                    print_color(f"\n🎯 Thread {thread_id}: Found nonce {nonce}", Fore.GREEN)
                     print_color(f"   Hash: {hash_value}", Fore.CYAN)
-                    print_color(f"   Timestamp: {timestamp}", Fore.CYAN)
-                    print_color(f"   Pending: {len(pending)}", Fore.CYAN)
+                    print_color(f"   Speed: {speed/1000:.1f} kH/s", Fore.CYAN)
 
                     if thread_id == 0 and cookie:
                         if submit_block(height, nonce, hash_value, prev_hash, base_reward, wallet, cookie, transactions):
@@ -201,7 +196,7 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
                         else:
                             print_color(f"❌❌❌ Block #{height} REJECTED! ❌❌❌", Fore.RED)
                     
-                    # Sau khi tìm thấy nonce, thoát để lấy block mới
+                    found = True
                     break
                 
                 nonce += 1
@@ -209,12 +204,6 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
                 if nonce % 10000 == 0:
                     with stats_lock:
                         total_hashes += 10000
-                    
-                    # Kiểm tra pending có thay đổi không
-                    new_pending = get_pending()
-                    if len(new_pending) != len(pending):
-                        print_color(f"⚠️ Pending changed from {len(pending)} to {len(new_pending)}", Fore.YELLOW)
-                        pending = new_pending
 
         except Exception as e:
             print_color(f"Thread {thread_id} error: {e}", Fore.RED)
@@ -251,50 +240,12 @@ def stats_thread():
         last_hashes = current_hashes
         last_time = now
 
-# ============== CẤU HÌNH ==============
-def save_config(wallet, password, threads, cpu_percent, difficulty):
-    config = configparser.ConfigParser()
-    config["WebCoin"] = {
-        "wallet": wallet,
-        "password": password,
-        "threads": str(threads),
-        "cpu_percent": str(cpu_percent),
-        "difficulty": str(difficulty) if difficulty else "auto"
-    }
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
-    with open(os.path.join(DATA_DIR, SETTINGS_FILE), "w") as f:
-        config.write(f)
-    print_color(f"✅ Config saved", Fore.GREEN)
-
-def load_config():
-    config_path = os.path.join(DATA_DIR, SETTINGS_FILE)
-    if not os.path.exists(config_path):
-        return None
-    config = configparser.ConfigParser()
-    config.read(config_path)
-    if "WebCoin" not in config:
-        return None
-    data = config["WebCoin"]
-    diff = data.get("difficulty")
-    if diff == "auto":
-        diff = None
-    elif diff:
-        diff = int(diff)
-    return {
-        "wallet": data.get("wallet", ""),
-        "password": data.get("password", ""),
-        "threads": int(data.get("threads", CPU_CORES)),
-        "cpu_percent": int(data.get("cpu_percent", 100)),
-        "difficulty": diff
-    }
-
 # ============== MAIN ==============
 def main():
     global running, start_time, auth_cookie
 
     print_color("\n" + "="*60, Fore.MAGENTA, bright=True)
-    print_color(" WEBCCOIN MINER v10.0 - PENDING CHO MỖI NONCE", Fore.MAGENTA, bright=True)
+    print_color(" WEBCCOIN MINER v11.0 - WORKING", Fore.MAGENTA, bright=True)
     print_color("="*60, Fore.MAGENTA, bright=True)
 
     config = load_config()
@@ -336,6 +287,10 @@ def main():
     auth_cookie = cookie
     print_color(f"✅ Đăng nhập thành công!", Fore.GREEN)
 
+    info = get_network_info()
+    if info:
+        print_color(f"\n📡 Độ khó: {info.get('difficulty', '?')} | Block: {info.get('latestBlock', {}).get('height', '?')} | Thưởng: {info.get('reward', '?')} WBC", Fore.CYAN)
+
     print_color(f"\n🚀 Bắt đầu đào {threads} luồng, {cpu_percent}% CPU", Fore.GREEN)
     print_color("="*60, Fore.MAGENTA)
 
@@ -354,6 +309,43 @@ def main():
     except KeyboardInterrupt:
         print_color(f"\n\n🛑 Stopping...", Fore.YELLOW)
         running = False
+
+def save_config(wallet, password, threads, cpu_percent, difficulty):
+    config = configparser.ConfigParser()
+    config["WebCoin"] = {
+        "wallet": wallet,
+        "password": password,
+        "threads": str(threads),
+        "cpu_percent": str(cpu_percent),
+        "difficulty": str(difficulty) if difficulty else "auto"
+    }
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
+    with open(os.path.join(DATA_DIR, SETTINGS_FILE), "w") as f:
+        config.write(f)
+    print_color(f"✅ Config saved", Fore.GREEN)
+
+def load_config():
+    config_path = os.path.join(DATA_DIR, SETTINGS_FILE)
+    if not os.path.exists(config_path):
+        return None
+    config = configparser.ConfigParser()
+    config.read(config_path)
+    if "WebCoin" not in config:
+        return None
+    data = config["WebCoin"]
+    diff = data.get("difficulty")
+    if diff == "auto":
+        diff = None
+    elif diff:
+        diff = int(diff)
+    return {
+        "wallet": data.get("wallet", ""),
+        "password": data.get("password", ""),
+        "threads": int(data.get("threads", CPU_CORES)),
+        "cpu_percent": int(data.get("cpu_percent", 100)),
+        "difficulty": diff
+    }
 
 if __name__ == "__main__":
     main()
