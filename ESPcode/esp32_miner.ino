@@ -1,6 +1,5 @@
 /*
  * WebCoin ESP32 Miner
- * Y hệt cách tính hash từ script.js
  * Chạy trên ESP32 (NodeMCU-32S, ESP32 DevKit, v.v.)
  */
 
