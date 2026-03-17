@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-WebCoin Miner - CHUẨN THEO WEB
+WebCoin Miner v4.0 - CHUẨN WEB
 - Copy chính xác cách tính hash từ script.js
-*/
+- ĐÃ SỬA LỖI LINE 121
+"""
 
 import os
 import sys
@@ -74,14 +75,14 @@ def login(wallet, password):
 
 def get_network_info(force=False):
     global cached_info, last_info_time
-    now = time.time()
-    if not force and cached_info and now - last_info_time < INFO_CACHE_TIME:
+    now_time = time.time()
+    if not force and cached_info and now_time - last_info_time < INFO_CACHE_TIME:
         return cached_info
     try:
         resp = requests.get(f"{SERVER_URL}/info", timeout=SOC_TIMEOUT)
         if resp.status_code == 200:
             cached_info = resp.json()
-            last_info_time = now
+            last_info_time = now_time
             return cached_info
     except:
         pass
@@ -90,7 +91,6 @@ def get_network_info(force=False):
 def submit_block(height, nonce, hash_value, prev_hash, reward, wallet, cookie):
     public_key = wallet[2:]
     
-    # Tạo transaction giống hệt web
     transactions = [{
         "from": None,
         "to": public_key,
@@ -108,7 +108,9 @@ def submit_block(height, nonce, hash_value, prev_hash, reward, wallet, cookie):
         "hash": hash_value,
         "minerAddress": wallet
     }
-    headers = {"Content-Type": "application/json", "Cookie": cookie} if cookie else {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json"}
+    if cookie:
+        headers["Cookie"] = cookie
     try:
         resp = requests.post(f"{SERVER_URL}/blocks/submit", json=data, headers=headers, timeout=SOC_TIMEOUT)
         return resp.status_code == 200
@@ -137,7 +139,7 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
 
     print_color(f"🧵 Thread {thread_id} started", Fore.CYAN)
     batch_size = 5000
-    nonce_base = thread_id * 5000000  # Mỗi thread range riêng
+    nonce_base = thread_id * 5000000
 
     while running:
         try:
@@ -155,7 +157,6 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
 
             timestamp = int(time.time() * 1000)
             
-            # Tạo transactions giống web
             public_key = wallet[2:]
             transactions = [{
                 "from": None,
@@ -171,12 +172,11 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
             start_local = time.time()
             local_hashes = 0
             
-            # Đào trong range của thread này
             for batch_start in range(nonce_base, nonce_base + 10000000, batch_size):
                 if not running:
                     break
 
-                batch_end = batch_start + batch_size
+                batch_end = min(batch_start + batch_size, nonce_base + 10000000)
                 
                 for nonce in range(batch_start, batch_end):
                     hash_value = calculate_block_hash(height, prev_hash, timestamp, transactions, nonce)
@@ -189,7 +189,6 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
                         print_color(f"\n🎯 Thread {thread_id}: Found nonce {nonce} in {elapsed:.1f}s ({speed/1000:.1f} kH/s)", Fore.GREEN)
                         print_color(f"   Hash: {hash_value}", Fore.CYAN)
 
-                        # Gửi block (chỉ thread 0)
                         if thread_id == 0 and cookie:
                             if submit_block(height, nonce, hash_value, prev_hash, reward, wallet, cookie):
                                 with stats_lock:
@@ -199,12 +198,9 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
                             else:
                                 print_color(f"❌ Block #{height} REJECTED!", Fore.RED)
                         
-                        # Reset để tìm block tiếp theo
+                        # Sau khi tìm thấy nonce, thoát vòng lặp để lấy block mới
                         break
                     
-                    if nonce % 10000 == 0:
-                        break
-                
                 with stats_lock:
                     total_hashes += (batch_end - batch_start)
                 
