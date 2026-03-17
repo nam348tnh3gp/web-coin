@@ -1,13 +1,12 @@
 /*
- * WebCoin ESP32 Miner
- * Chạy trên ESP32 (NodeMCU-32S, ESP32 DevKit, v.v.)
+ * WebCoin ESP32 Miner - Dùng DSHA1
  */
 
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <SHA1.h>
 #include <Preferences.h>
+#include "DSHA1.h"  // Thay vì <SHA1.h>
 
 // ============== CẤU HÌNH ==============
 const char* WIFI_SSID = "your_wifi_ssid";
@@ -77,7 +76,7 @@ String jsonStringify(JsonVariant obj) {
     return "null";
 }
 
-// ============== HÀM HASH GIỐNG JS ==============
+// ============== HÀM HASH DÙNG DSHA1 ==============
 String calculateBlockHash(int height, String prevHash, unsigned long timestamp, JsonArray transactions, unsigned long nonce) {
     // Tạo txString giống JS: join(JSON.stringify)
     String txString = "";
@@ -88,16 +87,18 @@ String calculateBlockHash(int height, String prevHash, unsigned long timestamp, 
     // Tạo data string
     String data = String(height) + prevHash + String(timestamp) + txString + String(nonce);
     
-    // Tính SHA1
-    SHA1 sha1;
-    sha1.update(data);
-    uint8_t* hashBytes = sha1.finalize();
+    // Dùng DSHA1 để tính hash
+    DSHA1 sha1;
+    sha1.write((const unsigned char*)data.c_str(), data.length());
+    
+    unsigned char hashResult[20];
+    sha1.finalize(hashResult);
     
     // Chuyển sang hex string
     String hash = "";
     for (int i = 0; i < 20; i++) {
-        if (hashBytes[i] < 0x10) hash += "0";
-        hash += String(hashBytes[i], HEX);
+        if (hashResult[i] < 0x10) hash += "0";
+        hash += String(hashResult[i], HEX);
     }
     return hash;
 }
