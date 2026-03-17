@@ -1,7 +1,6 @@
 /*
  * WebCoin Miner for ArduinoDroid
  * Chạy trên Android qua ArduinoDroid app
- * Y hệt cách tính hash từ script.js
  */
 
 #include <Arduino.h>
