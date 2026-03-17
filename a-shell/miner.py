@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """
-WebCoin Miner v12.1 - iOS EDITION
-- Fix lỗi cpu_freq trên iOS
-- Tốc độ tối đa
-- Điều chỉnh % CPU thật
+WebCoin Miner v13.0 - TIMESTAMP CỐ ĐỊNH
 """
 
 import os
@@ -18,17 +15,15 @@ import configparser
 import requests
 from colorama import init, Fore, Back, Style
 
-# BẮT BUỘC psutil để điều chỉnh CPU
 try:
     import psutil
     HAS_PSUTIL = True
-except ImportError:
-    print("❌ Cần cài psutil: pip install psutil")
-    sys.exit(1)
+except:
+    HAS_PSUTIL = False
 
 init(autoreset=True)
 
-VERSION = "12.1"
+VERSION = "13.0"
 SERVER_URL = "https://webcoin-1n9d.onrender.com/api"
 DATA_DIR = "WebCoin-Miner"
 SETTINGS_FILE = "config.ini"
@@ -43,7 +38,12 @@ stats_lock = threading.Lock()
 CPU_CORES = multiprocessing.cpu_count()
 auth_cookie = None
 
-# ============== TIỆN ÍCH ==============
+# Cache
+cached_info = None
+cached_pending = None
+last_info_time = 0
+INFO_CACHE_TIME = 2
+
 def now():
     return datetime.now()
 
@@ -74,22 +74,30 @@ def login(wallet, password):
         return None
 
 def get_network_info():
+    global cached_info, last_info_time
+    now_time = time.time()
+    if cached_info and now_time - last_info_time < INFO_CACHE_TIME:
+        return cached_info
     try:
         resp = requests.get(f"{SERVER_URL}/info", timeout=SOC_TIMEOUT)
         if resp.status_code == 200:
-            return resp.json()
+            cached_info = resp.json()
+            last_info_time = now_time
+            return cached_info
     except:
         pass
-    return None
+    return cached_info
 
 def get_pending():
+    global cached_pending
     try:
         resp = requests.get(f"{SERVER_URL}/pending", timeout=SOC_TIMEOUT)
         if resp.status_code == 200:
-            return resp.json()
+            cached_pending = resp.json()
+            return cached_pending
     except:
         pass
-    return []
+    return cached_pending if cached_pending else []
 
 def submit_block(height, nonce, hash_value, prev_hash, reward, wallet, cookie, transactions):
     data = {
@@ -110,7 +118,7 @@ def submit_block(height, nonce, hash_value, prev_hash, reward, wallet, cookie, t
     except:
         return False
 
-# ============== HASH TỐI ƯU ==============
+# ============== HASH CHUẨN ==============
 def json_stringify(obj):
     if obj is None:
         return "null"
@@ -140,11 +148,9 @@ class CPUController:
     def __init__(self, target_percent):
         self.target_percent = target_percent
         self.sleep_time = 0
-        self.running = True
         self.last_adjust = time.time()
     
     def adjust(self):
-        """Điều chỉnh sleep time dựa trên CPU hiện tại"""
         now = time.time()
         if now - self.last_adjust < 1:
             return self.sleep_time
@@ -153,34 +159,28 @@ class CPUController:
             current_cpu = psutil.cpu_percent(interval=0.2)
             diff = current_cpu - self.target_percent
             
-            if diff > 10:  # Quá tải nhiều
+            if diff > 10:
+                self.sleep_time = min(self.sleep_time + 0.001, 0.02)
+            elif diff > 5:
                 self.sleep_time = min(self.sleep_time + 0.0005, 0.01)
-            elif diff > 5:  # Quá tải nhẹ
-                self.sleep_time = min(self.sleep_time + 0.0002, 0.005)
-            elif diff < -10:  # Còn trống nhiều
+            elif diff < -10:
+                self.sleep_time = max(self.sleep_time - 0.001, 0)
+            elif diff < -5:
                 self.sleep_time = max(self.sleep_time - 0.0005, 0)
-            elif diff < -5:  # Còn trống nhẹ
-                self.sleep_time = max(self.sleep_time - 0.0002, 0)
             
             self.last_adjust = now
         except:
             pass
         
         return self.sleep_time
-    
-    def stop(self):
-        self.running = False
 
-# ============== MINING THREAD TURBO ==============
+# ============== MINING THREAD ==============
 def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, cookie):
     global total_hashes, blocks_mined, total_reward, running
     
-    # CPU Controller cho thread này
     cpu_controller = CPUController(target_cpu_percent)
+    print_color(f"🧵 Thread {thread_id} started", Fore.CYAN)
     
-    print_color(f"🧵 Thread {thread_id} started - Target CPU: {target_cpu_percent}%", Fore.CYAN)
-    
-    # Batch size lớn để tăng tốc
     BATCH_SIZE = 100000
     
     while running:
@@ -201,36 +201,38 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
             prev_hash = latest['hash']
             public_key = wallet[2:]
 
-            # Range lớn hơn cho mỗi thread
-            range_size = 200000000
-            start_nonce = thread_id * range_size
-            end_nonce = (thread_id + 1) * range_size
-            nonce = start_nonce
+            # QUAN TRỌNG: Lấy timestamp MỘT LẦN cho block này
+            timestamp = int(time.time() * 1000)
             
+            # Lấy pending transactions
             pending = get_pending()
+            
+            coinbase = {
+                "from": None,
+                "to": public_key,
+                "amount": base_reward,
+                "timestamp": timestamp,
+                "signature": None
+            }
+            
+            transactions = [coinbase] + pending
+
             if thread_id == 0:
                 print_color(f"\n📦 Block #{height} - {len(pending)} pending - Target: {target}", Fore.YELLOW)
+                print_color(f"   Timestamp: {timestamp}", Fore.CYAN)
+
+            # Range nonce cho thread này
+            start_nonce = thread_id * 200000000
+            end_nonce = (thread_id + 1) * 200000000
+            nonce = start_nonce
             
             start_local = time.time()
             local_hashes = 0
             found = False
+            found_hash = None
+            found_nonce = None
             
-            # Đào theo batch
             while running and nonce < end_nonce and not found:
-                # Tạo timestamp cho batch
-                timestamp = int(time.time() * 1000)
-                
-                coinbase = {
-                    "from": None,
-                    "to": public_key,
-                    "amount": base_reward,
-                    "timestamp": timestamp,
-                    "signature": None
-                }
-                
-                transactions = [coinbase] + pending
-                
-                # Đào BATCH_SIZE nonce liên tục
                 for i in range(BATCH_SIZE):
                     current_nonce = nonce + i
                     hash_value = calculate_block_hash(height, prev_hash, timestamp, transactions, current_nonce)
@@ -238,22 +240,22 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
                     
                     if hash_value.startswith(target):
                         found = True
-                        nonce = current_nonce
+                        found_nonce = current_nonce
+                        found_hash = hash_value
                         break
                 
                 nonce += BATCH_SIZE
                 
-                # Cập nhật hashrate
                 with stats_lock:
                     total_hashes += BATCH_SIZE
                 
-                # Điều chỉnh CPU theo target
+                # Điều chỉnh CPU
                 sleep_time = cpu_controller.adjust()
                 if sleep_time > 0:
                     time.sleep(sleep_time)
                 
-                # Báo cáo tốc độ
-                if local_hashes % 200000 == 0 and thread_id == 0:
+                # Báo cáo tiến độ
+                if local_hashes % 500000 == 0 and thread_id == 0:
                     elapsed = time.time() - start_local
                     speed = local_hashes / elapsed if elapsed > 0 else 0
                     try:
@@ -266,12 +268,12 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
                 elapsed = time.time() - start_local
                 speed = local_hashes / elapsed if elapsed > 0 else 0
                 
-                print_color(f"\n🎯 Thread {thread_id}: Found nonce {nonce}", Fore.GREEN)
+                print_color(f"\n🎯 Thread {thread_id}: Found nonce {found_nonce}", Fore.GREEN)
                 print_color(f"   Speed: {speed/1000:.1f} kH/s", Fore.CYAN)
-                print_color(f"   Hash: {hash_value[:20]}...", Fore.CYAN)
+                print_color(f"   Hash: {found_hash[:30]}...", Fore.CYAN)
 
                 if thread_id == 0 and cookie:
-                    if submit_block(height, nonce, hash_value, prev_hash, base_reward, wallet, cookie, transactions):
+                    if submit_block(height, found_nonce, found_hash, prev_hash, base_reward, wallet, cookie, transactions):
                         with stats_lock:
                             blocks_mined += 1
                             total_reward += base_reward
@@ -282,8 +284,6 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
         except Exception as e:
             print_color(f"Thread {thread_id} error: {e}", Fore.RED)
             time.sleep(1)
-    
-    cpu_controller.stop()
 
 # ============== STATS THREAD ==============
 def stats_thread():
@@ -302,7 +302,6 @@ def stats_thread():
         elapsed_total = now - start_time
         speed = (current_hashes - last_hashes) / (now - last_time) if (now - last_time) > 0 else 0
 
-        # Thông tin CPU - Bỏ cpu_freq không hỗ trợ iOS
         cpu_info = "N/A"
         try:
             cpu_percent = psutil.cpu_percent()
@@ -361,7 +360,7 @@ def main():
     global running, start_time, auth_cookie
 
     print_color("\n" + "="*70, Fore.MAGENTA, bright=True)
-    print_color(" WEBCCOIN MINER v12.1 - iOS EDITION", Fore.MAGENTA, bright=True)
+    print_color(" WEBCCOIN MINER v13.0 - TIMESTAMP CỐ ĐỊNH", Fore.MAGENTA, bright=True)
     print_color("="*70, Fore.MAGENTA, bright=True)
 
     print_color(f"\n🖥️  CPU: {CPU_CORES} cores", Fore.CYAN)
@@ -411,7 +410,7 @@ def main():
     if info:
         print_color(f"\n📡 Network: diff={info.get('difficulty')}, reward={info.get('reward')} WBC", Fore.CYAN)
 
-    print_color(f"\n🚀 Starting {threads} threads at {cpu_percent}% CPU target", Fore.GREEN)
+    print_color(f"\n🚀 Starting {threads} threads at {cpu_percent}% CPU", Fore.GREEN)
     print_color("="*70, Fore.MAGENTA)
 
     start_time = time.time()
