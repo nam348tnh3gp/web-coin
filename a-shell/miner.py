@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-WebCoin Miner v9.0 - FINAL FIX
+WebCoin Miner v10.0 - PENDING CHO MỖI NONCE
 """
 
 import os
@@ -23,7 +23,7 @@ except:
 
 init(autoreset=True)
 
-VERSION = "9.0"
+VERSION = "10.0"
 SERVER_URL = "https://webcoin-1n9d.onrender.com/api"
 DATA_DIR = "WebCoin-Miner"
 SETTINGS_FILE = "config.ini"
@@ -106,7 +106,6 @@ def submit_block(height, nonce, hash_value, prev_hash, reward, wallet, cookie, t
 
 # ============== HASH CHUẨN ==============
 def json_stringify(obj):
-    """Giống JSON.stringify trong JavaScript"""
     if obj is None:
         return "null"
     elif isinstance(obj, str):
@@ -126,7 +125,6 @@ def json_stringify(obj):
     return json.dumps(obj, separators=(',', ':'))
 
 def calculate_block_hash(height, prev_hash, timestamp, transactions, nonce):
-    """Y hệt script.js"""
     tx_string = ''.join([json_stringify(tx) for tx in transactions])
     data = f"{height}{prev_hash}{timestamp}{tx_string}{nonce}"
     return hashlib.sha1(data.encode()).hexdigest()
@@ -139,48 +137,49 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
 
     while running:
         try:
-            # LUÔN lấy thông tin mới nhất
+            # Lấy thông tin block hiện tại
             info = get_network_info()
             if not info or not info.get('latestBlock'):
                 time.sleep(0.1)
                 continue
 
-            # LUÔN lấy pending transactions mới nhất
-            pending = get_pending()
-            
             latest = info['latestBlock']
             network_diff = info.get('difficulty', 3)
-            reward = info.get('reward', 48)
+            base_reward = info.get('reward', 48)
 
             difficulty = difficulty_override if difficulty_override else network_diff
             target = "0" * difficulty
-
-            timestamp = int(time.time() * 1000)
-            
-            public_key = wallet[2:]
-            coinbase = {
-                "from": None,
-                "to": public_key,
-                "amount": reward,
-                "timestamp": timestamp,
-                "signature": None
-            }
-            
-            # Transactions = coinbase + pending (GIỐNG HỆT WEB)
-            transactions = [coinbase] + pending
             
             height = latest['height'] + 1
             prev_hash = latest['hash']
+            public_key = wallet[2:]
 
-            # In thông tin block
-            if thread_id == 0:
-                print_color(f"\n📦 Block #{height} - Độ khó {difficulty} - {len(pending)} pending", Fore.CYAN)
-
-            nonce = thread_id * 10000000
+            # Nonce range cho thread này
+            start_nonce = thread_id * 20000000
+            end_nonce = (thread_id + 1) * 20000000
+            nonce = start_nonce
+            
+            # Lấy pending transactions cho block này
+            pending = get_pending()
+            print_color(f"📦 Block #{height} - {len(pending)} pending transactions", Fore.YELLOW)
+            
             start_local = time.time()
             local_hashes = 0
             
-            while running:
+            while running and nonce < end_nonce:
+                # Tạo timestamp mới cho mỗi lần thử (giống web)
+                timestamp = int(time.time() * 1000)
+                
+                coinbase = {
+                    "from": None,
+                    "to": public_key,
+                    "amount": base_reward,
+                    "timestamp": timestamp,
+                    "signature": None
+                }
+                
+                transactions = [coinbase] + pending
+                
                 hash_value = calculate_block_hash(height, prev_hash, timestamp, transactions, nonce)
                 local_hashes += 1
                 
@@ -190,13 +189,15 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
                     
                     print_color(f"\n🎯 Thread {thread_id}: Found nonce {nonce} in {elapsed:.1f}s ({speed/1000:.1f} kH/s)", Fore.GREEN)
                     print_color(f"   Hash: {hash_value}", Fore.CYAN)
+                    print_color(f"   Timestamp: {timestamp}", Fore.CYAN)
+                    print_color(f"   Pending: {len(pending)}", Fore.CYAN)
 
                     if thread_id == 0 and cookie:
-                        if submit_block(height, nonce, hash_value, prev_hash, reward, wallet, cookie, transactions):
+                        if submit_block(height, nonce, hash_value, prev_hash, base_reward, wallet, cookie, transactions):
                             with stats_lock:
                                 blocks_mined += 1
-                                total_reward += reward
-                            print_color(f"✅✅✅ Block #{height} ACCEPTED! +{reward} WBC ✅✅✅", Fore.GREEN)
+                                total_reward += base_reward
+                            print_color(f"✅✅✅ Block #{height} ACCEPTED! +{base_reward} WBC ✅✅✅", Fore.GREEN)
                         else:
                             print_color(f"❌❌❌ Block #{height} REJECTED! ❌❌❌", Fore.RED)
                     
@@ -208,6 +209,12 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
                 if nonce % 10000 == 0:
                     with stats_lock:
                         total_hashes += 10000
+                    
+                    # Kiểm tra pending có thay đổi không
+                    new_pending = get_pending()
+                    if len(new_pending) != len(pending):
+                        print_color(f"⚠️ Pending changed from {len(pending)} to {len(new_pending)}", Fore.YELLOW)
+                        pending = new_pending
 
         except Exception as e:
             print_color(f"Thread {thread_id} error: {e}", Fore.RED)
@@ -287,7 +294,7 @@ def main():
     global running, start_time, auth_cookie
 
     print_color("\n" + "="*60, Fore.MAGENTA, bright=True)
-    print_color(" WEBCCOIN MINER v9.0 - FINAL FIX", Fore.MAGENTA, bright=True)
+    print_color(" WEBCCOIN MINER v10.0 - PENDING CHO MỖI NONCE", Fore.MAGENTA, bright=True)
     print_color("="*60, Fore.MAGENTA, bright=True)
 
     config = load_config()
@@ -328,11 +335,6 @@ def main():
         return
     auth_cookie = cookie
     print_color(f"✅ Đăng nhập thành công!", Fore.GREEN)
-
-    info = get_network_info()
-    if info:
-        print_color(f"\n📡 Mạng: độ khó {info.get('difficulty', '?')}, block #{info.get('latestBlock', {}).get('height', '?')}", Fore.CYAN)
-        print_color(f"   Phần thưởng: {info.get('reward', '?')} WBC", Fore.CYAN)
 
     print_color(f"\n🚀 Bắt đầu đào {threads} luồng, {cpu_percent}% CPU", Fore.GREEN)
     print_color("="*60, Fore.MAGENTA)
