@@ -1,5 +1,5 @@
 /*
- * WebCoin ESP32 Miner 
+ * WebCoin ESP32 Miner - FIXED (không dùng containsKey)
  */
 
 #include <WiFi.h>
@@ -19,7 +19,7 @@ const int SOC_TIMEOUT = 10;
 Preferences prefs;
 String walletAddress = "";
 String walletPassword = "";
-String walletPublicKey = "";  // Thêm biến lưu publicKey
+String walletPublicKey = "";
 String authCookie = "";
 int difficultyOverride = 0; // 0 = auto
 int cpuThreads = 2;
@@ -93,9 +93,10 @@ bool login(String wallet, String password) {
         DynamicJsonDocument doc(2048);
         deserializeJson(doc, response);
         
-        if (!doc.containsKey("error")) {
+        // Cách 2: Dùng .success() và .isNull() thay vì containsKey
+        if (doc["error"].isNull()) {  // Không có lỗi
             // Lưu publicKey từ response
-            if (doc.containsKey("publicKey")) {
+            if (doc["publicKey"].success()) {  // Kiểm tra publicKey tồn tại
                 walletPublicKey = doc["publicKey"].as<String>();
             }
             
@@ -131,7 +132,14 @@ DynamicJsonDocument* getNetworkInfo() {
         DynamicJsonDocument* doc = new DynamicJsonDocument(4096);
         deserializeJson(*doc, response);
         http.end();
-        return doc;
+        
+        // Kiểm tra có dữ liệu hợp lệ không
+        if ((*doc)["latestBlock"].success()) {
+            return doc;
+        } else {
+            delete doc;
+            return nullptr;
+        }
     }
     http.end();
     return nullptr;
@@ -151,7 +159,14 @@ DynamicJsonDocument* getPending() {
         DynamicJsonDocument* doc = new DynamicJsonDocument(16384);
         deserializeJson(*doc, response);
         http.end();
-        return doc;
+        
+        // Kiểm tra có dữ liệu không
+        if (!(*doc).isNull()) {
+            return doc;
+        } else {
+            delete doc;
+            return nullptr;
+        }
     }
     http.end();
     return nullptr;
@@ -169,7 +184,7 @@ bool submitBlock(int height, unsigned long nonce, String hash, String prevHash, 
     DynamicJsonDocument doc(16384);
     doc["height"] = height;
     doc["previousHash"] = prevHash;
-    doc["timestamp"] = (unsigned long)time(nullptr) * 1000;  // Dùng NTP time
+    doc["timestamp"] = (unsigned long)time(nullptr) * 1000;
     doc["nonce"] = nonce;
     doc["hash"] = hash;
     doc["minerAddress"] = walletAddress;
@@ -207,7 +222,8 @@ void miningTask(void* parameter) {
     while (running) {
         // Lấy thông tin mạng
         DynamicJsonDocument* info = getNetworkInfo();
-        if (!info || !(*info).containsKey("latestBlock")) {
+        // Cách 2: Kiểm tra bằng .success() thay vì .containsKey()
+        if (!info || !(*info)["latestBlock"].success()) {
             delete info;
             delay(1000);
             continue;
@@ -228,19 +244,19 @@ void miningTask(void* parameter) {
         DynamicJsonDocument* pendingDoc = getPending();
         JsonArray pending = pendingDoc ? pendingDoc->as<JsonArray>() : JsonArray();
         
-        // Lấy thời gian thực (giống Date.now() trong JS)
+        // Lấy thời gian thực
         time_t now = time(nullptr);
-        unsigned long timestamp = (unsigned long)now * 1000;  // milliseconds
+        unsigned long timestamp = (unsigned long)now * 1000;
         
-        // Tạo coinbase transaction giống JS
+        // Tạo coinbase transaction
         DynamicJsonDocument coinbaseDoc(512);
         coinbaseDoc["from"] = nullptr;
-        coinbaseDoc["to"] = walletPublicKey;  // Dùng publicKey gốc, KHÔNG cắt bỏ W_
+        coinbaseDoc["to"] = walletPublicKey;
         coinbaseDoc["amount"] = baseReward;
         coinbaseDoc["timestamp"] = timestamp;
         coinbaseDoc["signature"] = nullptr;
         
-        // Tạo transactions array giống JS
+        // Tạo transactions array
         DynamicJsonDocument transactionsDoc(16384);
         JsonArray transactions = transactionsDoc.to<JsonArray>();
         transactions.add(coinbaseDoc.as<JsonVariant>());
@@ -274,7 +290,7 @@ void miningTask(void* parameter) {
         bool found = false;
         
         while (running && nonce < endNonce && !found) {
-            // Cập nhật timestamp mỗi 10000 nonce (giống JS)
+            // Cập nhật timestamp mỗi 10000 nonce
             if (nonce % 10000 == 0) {
                 now = time(nullptr);
                 timestamp = (unsigned long)now * 1000;
@@ -336,7 +352,7 @@ void setup() {
     
     String line = createLine(60);
     Serial.println("\n" + line);
-    Serial.println(" WEBCCOIN ESP32 MINER - FULL COMPATIBLE");
+    Serial.println(" WEBCCOIN ESP32 MINER - FIXED VERSION");
     Serial.println(createLine(59));
     
     pinMode(LED_PIN, OUTPUT);
@@ -346,7 +362,7 @@ void setup() {
     prefs.begin("webcoin", false);
     walletAddress = prefs.getString("wallet", "");
     walletPassword = prefs.getString("password", "");
-    walletPublicKey = prefs.getString("pubkey", "");  // Đọc publicKey
+    walletPublicKey = prefs.getString("pubkey", "");
     cpuThreads = prefs.getInt("threads", 2);
     cpuPercent = prefs.getInt("cpu", 100);
     difficultyOverride = prefs.getInt("diff", 0);
@@ -435,7 +451,7 @@ void setup() {
         return;
     }
     
-    // Đồng bộ thời gian NTP (cho timestamp giống JS)
+    // Đồng bộ thời gian NTP
     Serial.print("\n🕒 Syncing NTP...");
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
     time_t now = time(nullptr);
@@ -487,7 +503,7 @@ void setup() {
         xTaskCreatePinnedToCore(
             miningTask,
             "MiningTask",
-            16384,  // Tăng stack size
+            16384,
             (void*)(intptr_t)i,
             1,
             NULL,
