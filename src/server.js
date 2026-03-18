@@ -5,7 +5,7 @@ const cookieParser = require('cookie-parser');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
-const { Transaction, Block, BlockchainController, ec } = require('./blockchain');
+const { Transaction, Block, BlockchainController, ec, hmacManager } = require('./blockchain');
 const db = require('./db');
 const config = require('./config');
 const { authenticateToken } = require('./middleware/auth');
@@ -26,7 +26,7 @@ app.use(helmet({
     }
 }));
 
-// CORS configuration - tự động chấp nhận origin trong production
+// CORS configuration
 const corsOptions = {
     origin: function (origin, callback) {
         if (!origin) return callback(null, true);
@@ -48,12 +48,10 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(cookieParser(config.SESSION_SECRET));
 
-// Trust proxy if behind reverse proxy (Render)
 if (config.TRUST_PROXY) {
     app.set('trust proxy', 1);
 }
 
-// Static files
 app.use(express.static('public'));
 
 // Helper functions
@@ -68,22 +66,25 @@ function parseDisplayAddress(displayAddr) {
     return displayAddr;
 }
 
-// Public APIs
+// ============== PUBLIC APIS ==============
+
 app.get('/api/info', (req, res) => {
     try {
         const latest = BlockchainController.getLatestBlock();
         const pendingCount = db.prepare('SELECT COUNT(*) as count FROM mempool').get().count;
         const difficulty = BlockchainController.adjustDifficulty();
         const reward = BlockchainController.calculateReward(difficulty);
+        const networkHashrate = BlockchainController.getNetworkHashrate();
         
         res.json({
             latestBlock: latest ? latest.toJSON() : null,
             difficulty,
             pendingCount,
-            reward: reward,
+            reward,
             minReward: config.MIN_REWARD,
             maxReward: config.MAX_REWARD,
-            blockTimeTarget: config.BLOCK_TIME_TARGET
+            blockTimeTarget: config.BLOCK_TIME_TARGET,
+            networkHashrate: Math.round(networkHashrate / 1000) // kH/s
         });
     } catch (err) {
         logger.error(err);
@@ -98,6 +99,20 @@ app.get('/api/blocks', (req, res) => {
         if (limit > 100) limit = 100;
         const blocks = BlockchainController.getAllBlocks(limit, offset).map(b => b.toJSON());
         res.json(blocks);
+    } catch (err) {
+        logger.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/api/block/:height', (req, res) => {
+    try {
+        const height = parseInt(req.params.height);
+        const block = BlockchainController.getBlockByHeight(height);
+        if (!block) {
+            return res.status(404).json({ error: 'Block not found' });
+        }
+        res.json(block.toJSON());
     } catch (err) {
         logger.error(err);
         res.status(500).json({ error: 'Internal server error' });
@@ -126,7 +141,6 @@ app.get('/api/pending', (req, res) => {
     }
 });
 
-// API lấy lịch sử giao dịch
 app.get('/api/history/:address', (req, res) => {
     try {
         const address = req.params.address;
@@ -148,7 +162,9 @@ app.get('/api/history/:address', (req, res) => {
                         timestamp: txJson.timestamp,
                         blockHeight: block.height,
                         type: txJson.from === null ? 'mine' : (txJson.from === publicKey ? 'send' : 'receive'),
-                        status: 'confirmed'
+                        status: 'confirmed',
+                        salt: txJson.salt,
+                        hmac: txJson.hmac
                     });
                 }
             }
@@ -162,7 +178,8 @@ app.get('/api/history/:address', (req, res) => {
     }
 });
 
-// Auth APIs
+// ============== AUTH APIS ==============
+
 app.post('/api/register', validate(registerSchema), async (req, res) => {
     try {
         const { password } = req.body;
@@ -243,10 +260,11 @@ app.post('/api/logout', (req, res) => {
     res.json({ message: 'Logged out' });
 });
 
-// Protected APIs
+// ============== PROTECTED APIS ==============
+
 app.post('/api/transactions', authenticateToken, validate(transactionSchema), (req, res) => {
     try {
-        const { from, to, amount, timestamp, signature } = req.body;
+        const { from, to, amount, timestamp, signature, salt, hmac } = req.body;
         const fromPub = parseDisplayAddress(from);
         const toPub = parseDisplayAddress(to);
 
@@ -256,9 +274,11 @@ app.post('/api/transactions', authenticateToken, validate(transactionSchema), (r
 
         const tx = new Transaction(fromPub, toPub, amount, timestamp);
         tx.signature = signature;
+        if (salt) tx.salt = salt;
+        if (hmac) tx.hmac = hmac;
 
         if (!tx.isValid()) {
-            return res.status(400).json({ error: 'Invalid signature' });
+            return res.status(400).json({ error: 'Invalid signature or HMAC' });
         }
 
         const balance = BlockchainController.getBalance(fromPub);
@@ -267,7 +287,12 @@ app.post('/api/transactions', authenticateToken, validate(transactionSchema), (r
         }
 
         BlockchainController.addToMempool(tx);
-        res.json({ message: 'Transaction added to mempool', txHash: tx.hash() });
+        res.json({ 
+            message: 'Transaction added to mempool', 
+            txHash: tx.hash(),
+            salt: tx.salt,
+            hmac: tx.hmac
+        });
     } catch (err) {
         logger.error(err);
         res.status(500).json({ error: 'Internal server error' });
@@ -276,7 +301,10 @@ app.post('/api/transactions', authenticateToken, validate(transactionSchema), (r
 
 app.post('/api/blocks/submit', authenticateToken, validate(blockSchema), (req, res) => {
     try {
-        const { height, transactions, previousHash, timestamp, nonce, hash, minerAddress } = req.body;
+        const { 
+            height, transactions, previousHash, timestamp, nonce, 
+            hash, minerAddress, blockHMAC, workerSalt, miningSalt 
+        } = req.body;
 
         const minerPub = parseDisplayAddress(minerAddress);
         if (minerPub !== req.user.publicKey) {
@@ -297,13 +325,31 @@ app.post('/api/blocks/submit', authenticateToken, validate(blockSchema), (req, r
 
         const txObjects = transactions.map(t => Transaction.fromJSON(t));
         const block = new Block(height, txObjects, previousHash, timestamp, nonce);
+        
+        // Set mining salt nếu có
+        if (miningSalt) block.miningSalt = miningSalt;
+        
         if (block.calculateHash() !== hash) {
             return res.status(400).json({ error: 'Hash calculation mismatch' });
         }
 
+        // Xác thực HMAC block
+        if (blockHMAC && workerSalt) {
+            const blockData = {
+                height,
+                hash,
+                previousHash,
+                nonce
+            };
+            if (!hmacManager.verify(blockData, blockHMAC, workerSalt)) {
+                return res.status(400).json({ error: 'Invalid block HMAC signature' });
+            }
+            block.blockHMAC = blockHMAC;
+        }
+
         const difficulty = BlockchainController.adjustDifficulty();
         if (!hash.startsWith('0'.repeat(difficulty))) {
-            return res.status(400).json({ error: 'Hash does not meet difficulty' });
+            return res.status(400).json({ error: 'Hash does not meet difficulty requirement' });
         }
 
         if (txObjects.length === 0 || txObjects[0].from !== null) {
@@ -321,6 +367,13 @@ app.post('/api/blocks/submit', authenticateToken, validate(blockSchema), (req, r
             return res.status(400).json({ error: 'Coinbase recipient mismatch' });
         }
 
+        // Verify all transactions in block
+        for (let i = 1; i < txObjects.length; i++) {
+            if (!txObjects[i].isValid()) {
+                return res.status(400).json({ error: `Invalid transaction at index ${i}` });
+            }
+        }
+
         const checkTx = db.transaction(() => {
             const balances = new Map();
             const balanceRows = db.prepare('SELECT address, balance FROM balances').all();
@@ -330,9 +383,6 @@ app.post('/api/blocks/submit', authenticateToken, validate(blockSchema), (req, r
 
             for (let i = 1; i < txObjects.length; i++) {
                 const tx = txObjects[i];
-                if (!tx.isValid()) {
-                    throw new Error(`Invalid signature in transaction ${i}`);
-                }
                 const senderBalance = balances.get(tx.from) || 0;
                 if (senderBalance < tx.amount) {
                     throw new Error(`Insufficient balance for transaction ${i}`);
@@ -347,34 +397,111 @@ app.post('/api/blocks/submit', authenticateToken, validate(blockSchema), (req, r
         });
 
         checkTx();
-        res.json({ message: 'Block accepted', block: { height, hash } });
+        
+        logger.info(`Block #${height} accepted from miner ${minerAddress}`);
+        res.json({ 
+            message: 'Block accepted', 
+            block: { height, hash },
+            blockHMAC: block.blockHMAC
+        });
     } catch (err) {
         logger.error(err);
         res.status(400).json({ error: err.message });
     }
 });
 
-// Genesis block
+// ============== API KEY MANAGEMENT ==============
+
+app.post('/api/apikey/generate', authenticateToken, (req, res) => {
+    try {
+        const apiKey = BlockchainController.generateMinerAPIKey(req.user.publicKey);
+        res.json(apiKey);
+    } catch (err) {
+        logger.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/api/apikey/verify', (req, res) => {
+    try {
+        const { apiKey, signature, salt } = req.body;
+        const isValid = BlockchainController.verifyMinerAPIKey(apiKey, signature, salt);
+        res.json({ valid: isValid });
+    } catch (err) {
+        logger.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============== NETWORK STATS ==============
+
+app.get('/api/stats', (req, res) => {
+    try {
+        const blocks = BlockchainController.getAllBlocks(100);
+        const totalBlocks = db.prepare('SELECT COUNT(*) as count FROM blocks').get().count;
+        const totalTransactions = db.prepare('SELECT COUNT(*) as count FROM mempool').get().count;
+        const totalWallets = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
+        
+        const difficulty = BlockchainController.adjustDifficulty();
+        const networkHashrate = BlockchainController.getNetworkHashrate();
+        
+        // Calculate average block time
+        let avgBlockTime = 0;
+        if (blocks.length > 1) {
+            const firstBlock = blocks[0];
+            const lastBlock = blocks[blocks.length - 1];
+            const timeSpan = (lastBlock.timestamp - firstBlock.timestamp) / 1000;
+            avgBlockTime = timeSpan / (blocks.length - 1);
+        }
+        
+        res.json({
+            totalBlocks,
+            totalTransactions,
+            totalWallets,
+            currentDifficulty: difficulty,
+            networkHashrate: Math.round(networkHashrate / 1000), // kH/s
+            averageBlockTime: Math.round(avgBlockTime),
+            lastBlock: blocks[blocks.length - 1]?.toJSON()
+        });
+    } catch (err) {
+        logger.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============== GENESIS BLOCK ==============
+
 (function initGenesis() {
     const latest = BlockchainController.getLatestBlock();
     if (!latest) {
         const genesis = new Block(0, [], "0", Date.now(), 0);
+        genesis.miningSalt = crypto.randomBytes(4).toString('hex');
         genesis.hash = genesis.calculateHash();
+        genesis.generateBlockHMAC();
         BlockchainController.addBlock(genesis);
-        logger.info('Genesis block created');
+        logger.info('Genesis block created with HMAC');
+        logger.info(`Genesis hash: ${genesis.hash}`);
+        logger.info(`Genesis HMAC: ${genesis.blockHMAC}`);
     }
 })();
 
-// Health check
+// ============== HEALTH CHECK ==============
+
 app.get('/health', (req, res) => res.send('OK'));
 
-// Error handling
+// ============== ERROR HANDLING ==============
+
 app.use((err, req, res, next) => {
     logger.error(err.stack);
     res.status(500).json({ error: 'Something went wrong!' });
 });
 
+// ============== START SERVER ==============
+
 const PORT = config.PORT;
 app.listen(PORT, () => {
-    logger.info(`Server running on http://localhost:${PORT} in ${config.NODE_ENV} mode`);
+    logger.info(`🚀 WebCoin server running on http://localhost:${PORT} in ${config.NODE_ENV} mode`);
+    logger.info(`📊 HMAC Security: Enabled`);
+    logger.info(`🔐 Salt rotation: ${config.HMAC_SALT_ROTATION_INTERVAL / 3600000}h`);
+    logger.info(`⛏️  PoW Algorithm: SHA-1 with mining salt`);
 });
