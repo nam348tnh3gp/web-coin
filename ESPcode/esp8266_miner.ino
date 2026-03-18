@@ -6,19 +6,16 @@
 #include "DSHA1.h"
 #include <time.h>
 
+// cấu hình wifi
 const char* WIFI_SSID = "your_wifi_ssid";
 const char* WIFI_PASS = "your_wifi_password";
 const char* SERVER_URL = "https://webcoin-1n9d.onrender.com/api";
 
 #define EEPROM_SIZE 512
 #define CONFIG_VERSION 0x02
+#define LED_PIN LED_BUILTIN  // ESP8266 LED thường ở GPIO2
 
-// FIX LED
-#ifndef LED_BUILTIN
-#define LED_BUILTIN 2
-#endif
-#define LED_PIN LED_BUILTIN
-
+// cấu trúc dữ liệu
 struct Config {
     uint8_t version;
     char wallet[100];
@@ -33,10 +30,9 @@ String authCookie = "";
 volatile unsigned long totalHashes = 0;
 volatile int blocksMined = 0;
 volatile int totalReward = 0;
-
 unsigned long startTime;
 
-// Hash
+// hàm băm
 String calculateHash(int height, String prevHash, unsigned long ts, String txStr, unsigned long nonce) {
     char data[512];
     snprintf(data, sizeof(data), "%d%s%lu%s%lu",
@@ -59,10 +55,14 @@ String calculateHash(int height, String prevHash, unsigned long ts, String txStr
 
 // login
 bool login() {
-    client.setInsecure();
-
+    client.setInsecure();  // Bỏ qua kiểm tra SSL (tạm thời)
+    
     HTTPClient http;
-    http.begin(client, String(SERVER_URL) + "/login");
+    if (!http.begin(client, String(SERVER_URL) + "/login")) {
+        Serial.println("[HTTP] Khong the ket noi!");
+        return false;
+    }
+    
     http.addHeader("Content-Type", "application/json");
 
     String payload = "{\"displayAddress\":\"" + String(config.wallet) +
@@ -94,10 +94,12 @@ bool login() {
     return false;
 }
 
-// get network
+// thông tin mạng
 bool getNetwork(DynamicJsonDocument &doc) {
     HTTPClient http;
-    http.begin(client, String(SERVER_URL) + "/info");
+    if (!http.begin(client, String(SERVER_URL) + "/info")) {
+        return false;
+    }
 
     if (authCookie.length()) http.addHeader("Cookie", authCookie);
 
@@ -113,10 +115,12 @@ bool getNetwork(DynamicJsonDocument &doc) {
     return false;
 }
 
-// get pending
+// pending
 bool getPending(DynamicJsonDocument &doc) {
     HTTPClient http;
-    http.begin(client, String(SERVER_URL) + "/pending");
+    if (!http.begin(client, String(SERVER_URL) + "/pending")) {
+        return false;
+    }
 
     if (authCookie.length()) http.addHeader("Cookie", authCookie);
 
@@ -132,16 +136,17 @@ bool getPending(DynamicJsonDocument &doc) {
     return false;
 }
 
-// submit
+// gửi block
 bool submitBlock(int height, unsigned long nonce, String hash, String prevHash, int reward, String txStr) {
     HTTPClient http;
-    http.begin(client, String(SERVER_URL) + "/blocks/submit");
+    if (!http.begin(client, String(SERVER_URL) + "/blocks/submit")) {
+        return false;
+    }
+    
     http.addHeader("Content-Type", "application/json");
-
     if (authCookie.length()) http.addHeader("Cookie", authCookie);
 
     DynamicJsonDocument doc(4096);
-
     doc["height"] = height;
     doc["previousHash"] = prevHash;
     doc["timestamp"] = (unsigned long)time(nullptr) * 1000;
@@ -162,7 +167,7 @@ bool submitBlock(int height, unsigned long nonce, String hash, String prevHash, 
     return code == 200;
 }
 
-// EEPROM
+// lưu cấu hình
 void saveConfig() {
     EEPROM.put(0, config);
     EEPROM.commit();
@@ -188,55 +193,80 @@ void setup() {
     delay(1000);
 
     pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, HIGH);  // Tắt LED
 
     loadConfig();
 
     if (strlen(config.wallet) == 0) {
-        Serial.println("Nhap wallet:");
+        Serial.println("Nhap wallet (dang W_...):");
         while (!Serial.available());
         String w = Serial.readStringUntil('\n');
+        w.trim();
         strncpy(config.wallet, w.c_str(), sizeof(config.wallet) - 1);
 
         Serial.println("Nhap password:");
         while (!Serial.available());
         String p = Serial.readStringUntil('\n');
+        p.trim();
         strncpy(config.password, p.c_str(), sizeof(config.password) - 1);
 
         saveConfig();
     }
 
+    Serial.print("Dang ket noi WiFi");
     WiFi.begin(WIFI_SSID, WIFI_PASS);
-    while (WiFi.status() != WL_CONNECTED) {
+    
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 40) {
         delay(500);
         Serial.print(".");
+        attempts++;
     }
 
-    Serial.println("\nWiFi OK");
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("\nWiFi OK");
+    } else {
+        Serial.println("\nWiFi FAIL!");
+        return;
+    }
 
-    configTime(0, 0, "pool.ntp.org");
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    
+    Serial.print("Dong bo thoi gian");
+    time_t now = time(nullptr);
+    while (now < 100000 && attempts < 20) {
+        delay(500);
+        Serial.print(".");
+        now = time(nullptr);
+        attempts++;
+    }
+    Serial.println();
 
     if (!login()) {
-        Serial.println("Login fail");
+        Serial.println("Login fail!");
         return;
     }
 
     Serial.println("Login OK");
-
     startTime = millis();
 }
 
 // loop
 void loop() {
-
+    static unsigned long lastStats = 0;
+    
+    // Kiểm tra WiFi
     if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("Mat WiFi, dang ket noi lai...");
         WiFi.reconnect();
-        delay(1000);
+        delay(5000);
         return;
     }
 
-    DynamicJsonDocument info(4096);
+    // Lấy thông tin mạng
+    DynamicJsonDocument info(2048);
     if (!getNetwork(info)) {
-        delay(1000);
+        delay(2000);
         return;
     }
 
@@ -251,16 +281,14 @@ void loop() {
     int height = latest["height"].as<int>() + 1;
     String prevHash = latest["hash"].as<String>();
 
-    DynamicJsonDocument pendingDoc(4096);
-    String txStr = "[";
-
+    // Tạo chuỗi giao dịch
     unsigned long ts = time(nullptr) * 1000;
+    String txStr = "[{\"from\":null,\"to\":\"" + String(config.publicKey) +
+                   "\",\"amount\":" + String(reward) +
+                   ",\"timestamp\":" + String(ts) +
+                   ",\"signature\":null}";
 
-    txStr += "{\"from\":null,\"to\":\"" + String(config.publicKey) +
-             "\",\"amount\":" + String(reward) +
-             ",\"timestamp\":" + String(ts) +
-             ",\"signature\":null}";
-
+    DynamicJsonDocument pendingDoc(2048);
     if (getPending(pendingDoc)) {
         for (JsonObject tx : pendingDoc.as<JsonArray>()) {
             String tmp;
@@ -268,34 +296,58 @@ void loop() {
             txStr += "," + tmp;
         }
     }
-
     txStr += "]";
 
-    Serial.printf("\n[BLOCK] %d | diff %d\n", height, diff);
+    Serial.printf("\n[BLOCK %d] Do kho: %d | Thuong: %d\n", height, diff, reward);
+    Serial.printf("Bat dau dao...\n");
 
     unsigned long nonce = 0;
+    unsigned long lastBlink = millis();
+    bool ledState = false;
 
     while (true) {
+        // Nhấp nháy LED báo hiệu đang chạy
+        if (millis() - lastBlink > 500) {
+            ledState = !ledState;
+            digitalWrite(LED_PIN, ledState ? LOW : HIGH);
+            lastBlink = millis();
+        }
 
+        // Tính hash
         String hash = calculateHash(height, prevHash, ts, txStr, nonce);
-
         totalHashes++;
 
+        // Kiểm tra kết quả
         if (hash.startsWith(target)) {
-
-            Serial.printf("\n[FOUND] nonce=%lu\n", nonce);
-
+            digitalWrite(LED_PIN, HIGH);  // Tắt LED
+            Serial.printf("\n[FOUND] Nonce: %lu | Hash: %s\n", nonce, hash.c_str());
+            
             if (submitBlock(height, nonce, hash, prevHash, reward, txStr)) {
                 blocksMined++;
                 totalReward += reward;
+                Serial.printf("[OK] Block %d duoc chap nhan! +%d WebCoin\n", height, reward);
+            } else {
+                Serial.printf("[FAIL] Block %d bi tu choi\n", height);
             }
-
             break;
         }
 
         nonce++;
 
-        if (nonce % 5000 == 0) delay(0);
+        // Thống kê tốc độ mỗi 10 giây
+        if (nonce % 10000 == 0) {
+            float speed = totalHashes / ((millis() - startTime) / 1000.0);
+            Serial.printf("\rSpeed: %.2f H/s | Total: %d | Blocks: %d | Reward: %d", 
+                         speed, totalHashes, blocksMined, totalReward);
+            
+            // Cho phép ESP8266 xử lý WiFi
+            yield();
+        }
+
+        // Tránh watchdog timeout
+        if (nonce % 5000 == 0) {
+            delay(0);
+        }
     }
 
     delay(100);
