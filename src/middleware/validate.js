@@ -9,15 +9,18 @@ const loginSchema = Joi.object({
     password: Joi.string().required()
 });
 
-// ĐÃ SỬA: Bỏ min() và max() để không kiểm tra timestamp
+// Schema cho transaction - THÊM salt và hmac
 const transactionSchema = Joi.object({
     from: Joi.string().required(),
     to: Joi.string().required(),
     amount: Joi.number().integer().positive().required(),
-    timestamp: Joi.number().integer().required(), // Chỉ cần là number, không check range
-    signature: Joi.string().required()
+    timestamp: Joi.number().integer().required(),
+    signature: Joi.string().required(),
+    salt: Joi.string().optional(),
+    hmac: Joi.string().optional()
 });
 
+// Schema cho block - THÊM blockHMAC, workerSalt, miningSalt
 const blockSchema = Joi.object({
     height: Joi.number().integer().required(),
     transactions: Joi.array().required(),
@@ -25,7 +28,10 @@ const blockSchema = Joi.object({
     timestamp: Joi.number().integer().required(),
     nonce: Joi.number().integer().required(),
     hash: Joi.string().required(),
-    minerAddress: Joi.string().pattern(/^W_/).required()
+    minerAddress: Joi.string().pattern(/^W_/).required(),
+    blockHMAC: Joi.string().optional(),
+    workerSalt: Joi.string().optional(),
+    miningSalt: Joi.string().optional()
 });
 
 function validate(schema) {
