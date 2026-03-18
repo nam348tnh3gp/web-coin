@@ -69,7 +69,7 @@ bool login() {
         return false;
     }
     
-    client->setInsecure();
+    client->setFingerprint("");
     
     HTTPClient http;
     http.begin(*client, String(SERVER_URL) + "/login");
@@ -153,7 +153,7 @@ bool getNetwork(DynamicJsonDocument &doc) {
     WiFiClientSecure *client = new WiFiClientSecure;
     if(!client) return false;
     
-    client->setInsecure();
+    client->setFingerprint("");
     HTTPClient http;
     http.begin(*client, String(SERVER_URL) + "/info");
     if (authCookie.length()) http.addHeader("Cookie", authCookie);
@@ -177,7 +177,7 @@ bool getPending(DynamicJsonDocument &doc) {
     WiFiClientSecure *client = new WiFiClientSecure;
     if(!client) return false;
     
-    client->setInsecure();
+    client->setFingerprint("");
     HTTPClient http;
     http.begin(*client, String(SERVER_URL) + "/pending");
     if (authCookie.length()) http.addHeader("Cookie", authCookie);
@@ -201,7 +201,7 @@ bool submitBlock(int height, unsigned long nonce, String hash, String prevHash, 
     WiFiClientSecure *client = new WiFiClientSecure;
     if(!client) return false;
     
-    client->setInsecure();
+    client->setFingerprint("");
     HTTPClient http;
     http.begin(*client, String(SERVER_URL) + "/blocks/submit");
     http.addHeader("Content-Type", "application/json");
