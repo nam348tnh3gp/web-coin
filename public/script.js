@@ -12,8 +12,28 @@ let isMining = false;
 let stopButton = null;
 let transactionHistory = [];
 let historyFilter = 'all';
-let networkDifficulty = 3; // Độ khó thật của mạng
-let miningDifficulty = 3;   // Độ khó đang dùng để đào (có thể điều chỉnh)
+let networkDifficulty = 3;
+let miningDifficulty = 3;
+
+// ============== HÀM HMAC ==============
+function generateSalt(length = 16) {
+    const array = new Uint8Array(length);
+    crypto.getRandomValues(array);
+    return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function generateHMAC(data, secretKey, salt) {
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(secretKey + salt);
+    const dataData = encoder.encode(typeof data === 'string' ? data : JSON.stringify(data));
+    
+    const key = await crypto.subtle.importKey(
+        'raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+    );
+    
+    const signature = await crypto.subtle.sign('HMAC', key, dataData);
+    return Array.from(new Uint8Array(signature), byte => byte.toString(16).padStart(2, '0')).join('');
+}
 
 // Hàm chuyển tab
 function showTab(tabId) {
@@ -27,7 +47,6 @@ function showTab(tabId) {
     }
 }
 
-// Helper hiển thị lỗi/thành công
 function showError(elementId, message) {
     const el = document.getElementById(elementId);
     if (el) {
@@ -44,14 +63,12 @@ function showSuccess(elementId, message) {
     }
 }
 
-// Điều chỉnh độ khó đào (từ thanh trượt)
 function adjustMiningDifficulty() {
     const slider = document.getElementById('difficulty-slider');
     if (slider) {
         miningDifficulty = parseInt(slider.value);
         document.getElementById('current-difficulty-display').innerText = miningDifficulty;
         
-        // Hiển thị cảnh báo nếu đang đặt độ khó thấp hơn mạng
         const warningEl = document.getElementById('difficulty-warning');
         if (warningEl) {
             if (miningDifficulty < networkDifficulty) {
@@ -65,7 +82,6 @@ function adjustMiningDifficulty() {
     }
 }
 
-// Đăng ký ví
 async function registerWallet() {
     const password = document.getElementById('reg-password').value;
     if (!password || password.length < 6) {
@@ -92,7 +108,6 @@ async function registerWallet() {
     }
 }
 
-// Đăng nhập
 async function loginWallet() {
     const displayAddress = document.getElementById('login-address').value.trim();
     const password = document.getElementById('login-password').value;
@@ -183,7 +198,6 @@ async function loginWallet() {
 
             currentWallet.privateKey = privateKeyHex;
 
-            // Hiển thị thông tin ví
             document.getElementById('wallet-info').style.display = 'block';
             document.getElementById('wallet-display-address').innerText = currentWallet.displayAddress;
 
@@ -205,7 +219,6 @@ async function loginWallet() {
     }
 }
 
-// Đăng xuất
 async function logoutWallet() {
     stopMining();
     
@@ -218,7 +231,6 @@ async function logoutWallet() {
     document.getElementById('history-info').style.display = 'block';
 }
 
-// Cập nhật số dư
 async function refreshBalance() {
     if (!currentWallet.displayAddress) return;
     try {
@@ -230,7 +242,7 @@ async function refreshBalance() {
     }
 }
 
-// Gửi giao dịch
+// ============== SỬA HÀM GỬI GIAO DỊCH ==============
 async function sendTransaction() {
     if (!currentWallet.privateKey) {
         showError('send-result', 'Vui lòng đăng nhập trước');
@@ -252,16 +264,28 @@ async function sendTransaction() {
     }
 
     const timestamp = Date.now();
+    const salt = generateSalt(16); // Tạo salt mới
+    
     const tx = {
         from: currentWallet.publicKey,
         to: to.substring(2),
         amount,
-        timestamp
+        timestamp,
+        salt
     };
 
-    const hash = CryptoJS.SHA256(tx.from + tx.to + tx.amount + tx.timestamp).toString();
+    const hash = CryptoJS.SHA256(tx.from + tx.to + tx.amount + tx.timestamp + tx.salt).toString();
     const key = ec.keyFromPrivate(currentWallet.privateKey);
     const signature = key.sign(hash).toDER('hex');
+    
+    // Tạo HMAC cho transaction
+    const hmac = await generateHMAC({
+        from: tx.from,
+        to: tx.to,
+        amount: tx.amount,
+        timestamp: tx.timestamp,
+        hash: hash
+    }, currentWallet.privateKey, salt);
 
     try {
         const res = await fetch('/api/transactions', {
@@ -272,13 +296,15 @@ async function sendTransaction() {
                 to: tx.to,
                 amount: tx.amount,
                 timestamp: tx.timestamp,
-                signature
+                signature,
+                salt,
+                hmac
             }),
             credentials: 'include'
         });
         const data = await res.json();
         if (res.ok) {
-            showSuccess('send-result', '✅ ' + data.message);
+            showSuccess('send-result', '✅ ' + data.message + ` (HMAC: ${data.hmac.substring(0, 8)}...)`);
             refreshBalance();
             loadInfo();
             loadHistory();
@@ -290,7 +316,6 @@ async function sendTransaction() {
     }
 }
 
-// Load thông tin mạng
 async function loadInfo() {
     try {
         const res = await fetch('/api/info');
@@ -302,7 +327,11 @@ async function loadInfo() {
         document.getElementById('min-reward').innerText = data.minReward;
         document.getElementById('max-reward').innerText = data.maxReward;
         
-        // Cập nhật thanh trượt
+        // Hiển thị hashrate mạng
+        if (data.networkHashrate) {
+            document.getElementById('network-hashrate').innerText = data.networkHashrate + ' kH/s';
+        }
+        
         const difficultySlider = document.getElementById('difficulty-slider');
         if (difficultySlider) {
             difficultySlider.value = miningDifficulty;
@@ -316,7 +345,6 @@ async function loadInfo() {
     }
 }
 
-// Load blockchain
 async function loadChain() {
     try {
         const res = await fetch('/api/blocks');
@@ -327,7 +355,6 @@ async function loadChain() {
     }
 }
 
-// Load lịch sử giao dịch
 async function loadHistory() {
     if (!currentWallet.displayAddress) {
         document.getElementById('history-controls').style.display = 'none';
@@ -357,7 +384,6 @@ async function loadHistory() {
     }
 }
 
-// Hiển thị lịch sử theo filter
 function displayHistory() {
     const historyList = document.getElementById('history-list');
     
@@ -416,10 +442,11 @@ function displayHistory() {
                 
                 <div class="history-footer">
                     <span class="history-block">⛓️ Block #${tx.blockHeight}</span>
-                    <span class="history-tx-hash" onclick="alert('Hash giao dịch:\\n${tx.hash}')" title="Click để xem hash">
+                    <span class="history-tx-hash" onclick="alert('Hash giao dịch:\\n${tx.hash}\\n\\nHMAC: ${tx.hmac}')" title="Click để xem hash và HMAC">
                         🔗 ${tx.hash.substring(0, 10)}...
                     </span>
                 </div>
+                ${tx.hmac ? `<div class="history-hmac">🔐 HMAC: ${tx.hmac.substring(0, 8)}...</div>` : ''}
             </div>
         `;
     });
@@ -427,7 +454,6 @@ function displayHistory() {
     historyList.innerHTML = html;
 }
 
-// Hàm dừng đào
 function stopMining() {
     isMining = false;
     if (stopButton && stopButton.parentNode) {
@@ -436,14 +462,13 @@ function stopMining() {
     }
 }
 
-// Đào block với độ khó tùy chỉnh
+// ============== SỬA HÀM ĐÀO ==============
 async function startMining() {
     if (!currentWallet.displayAddress) {
         showError('mining-log', 'Vui lòng đăng nhập trước');
         return;
     }
 
-    // Nếu đang đào thì tạm dừng
     if (isMining) {
         stopMining();
         document.getElementById('mining-log').innerHTML += '\n⏸️ Đã tạm dừng đào.\n';
@@ -455,7 +480,6 @@ async function startMining() {
     const logDiv = document.getElementById('mining-log');
     logDiv.innerHTML = `🔄 Bắt đầu đào tự động với độ khó ${miningDifficulty}...\n`;
     
-    // Cảnh báo nếu độ khó thấp hơn mạng
     if (miningDifficulty < networkDifficulty) {
         logDiv.innerHTML += `⚠️ CẢNH BÁO: Độ khó ${miningDifficulty} thấp hơn mạng (${networkDifficulty}). Block có thể bị từ chối!\n`;
     }
@@ -464,7 +488,6 @@ async function startMining() {
     document.getElementById('mine-btn').textContent = '⏸️ Tạm dừng đào';
     document.getElementById('mine-btn').style.background = '#ffc107';
     
-    // Thêm nút dừng hẳn
     if (!stopButton) {
         stopButton = document.createElement('button');
         stopButton.id = 'stop-mining-btn';
@@ -488,7 +511,6 @@ async function startMining() {
         buttonContainer.appendChild(stopButton);
     }
 
-    // Vòng lặp đào
     while (isMining) {
         try {
             const info = await loadInfo();
@@ -513,29 +535,42 @@ async function startMining() {
                 to: p.to,
                 amount: p.amount,
                 timestamp: p.timestamp,
-                signature: p.signature
+                signature: p.signature,
+                salt: p.salt,
+                hmac: p.hmac
             }))];
 
             const latest = info.latestBlock;
+            const miningSalt = generateSalt(8); // Tạo mining salt mới cho mỗi block
+            
             const newBlock = {
                 height: latest ? latest.height + 1 : 0,
                 transactions,
                 previousHash: latest ? latest.hash : "0",
                 timestamp: Date.now(),
-                nonce: 0
+                nonce: 0,
+                miningSalt
             };
 
             function calculateBlockHash(block) {
                 const txString = block.transactions.map(tx => JSON.stringify(tx)).join('');
-                return CryptoJS.SHA1(block.height + block.previousHash + block.timestamp + txString + block.nonce).toString();
+                return CryptoJS.SHA1(
+                    block.height + 
+                    block.previousHash + 
+                    block.timestamp + 
+                    txString + 
+                    block.nonce + 
+                    (block.miningSalt || '')
+                ).toString();
             }
 
             let hash = calculateBlockHash(newBlock);
-            const target = '0'.repeat(miningDifficulty); // Dùng độ khó từ thanh trượt
+            const target = '0'.repeat(miningDifficulty);
             let attempts = 0;
             const startTime = Date.now();
 
-            logDiv.innerHTML += `\n⛏️ Đào block #${newBlock.height} (độ khó đặt: ${miningDifficulty}, mạng: ${networkDifficulty}, thưởng ${info.reward} WebCoin)...\n`;
+            logDiv.innerHTML += `\n⛏️ Đào block #${newBlock.height} (độ khó: ${miningDifficulty}, mạng: ${networkDifficulty}, thưởng ${info.reward} WebCoin)\n`;
+            logDiv.innerHTML += `   Mining Salt: ${miningSalt}\n`;
 
             while (!hash.startsWith(target) && isMining) {
                 newBlock.nonce++;
@@ -545,7 +580,7 @@ async function startMining() {
                 if (attempts % 10000 === 0 && isMining) {
                     const elapsed = ((Date.now() - startTime)/1000).toFixed(1);
                     const speed = (attempts / elapsed).toFixed(0);
-                    logDiv.innerHTML += `⏳ Đã thử ${attempts} nonce, tốc độ ${speed} H/s, hash hiện tại: ${hash.substring(0, 20)}...\n`;
+                    logDiv.innerHTML += `⏳ Đã thử ${attempts} nonce, tốc độ ${speed} H/s, hash: ${hash.substring(0, 20)}...\n`;
                     logDiv.scrollTop = logDiv.scrollHeight;
                     await new Promise(resolve => setTimeout(resolve, 0));
                 }
@@ -558,6 +593,17 @@ async function startMining() {
             logDiv.innerHTML += `🔗 Hash: ${hash}\n`;
             logDiv.innerHTML += `⏱️ Thời gian: ${totalTime}s\n`;
 
+            // Tạo HMAC cho block
+            const workerSalt = generateSalt(16);
+            const blockHMAC = await generateHMAC({
+                height: newBlock.height,
+                hash: hash,
+                previousHash: newBlock.previousHash,
+                nonce: newBlock.nonce
+            }, currentWallet.privateKey, workerSalt);
+
+            logDiv.innerHTML += `🔐 Block HMAC: ${blockHMAC.substring(0, 16)}...\n`;
+
             const submitData = {
                 height: newBlock.height,
                 transactions: newBlock.transactions,
@@ -565,7 +611,10 @@ async function startMining() {
                 timestamp: newBlock.timestamp,
                 nonce: newBlock.nonce,
                 hash: hash,
-                minerAddress: currentWallet.displayAddress
+                minerAddress: currentWallet.displayAddress,
+                blockHMAC,
+                workerSalt,
+                miningSalt
             };
 
             const submitRes = await fetch('/api/blocks/submit', {
@@ -577,18 +626,16 @@ async function startMining() {
             
             const result = await submitRes.json();
             if (submitRes.ok) {
-                logDiv.innerHTML += `✅ Block accepted! Nhận ${info.reward} WebCoin\n`;
+                logDiv.innerHTML += `✅ Block accepted! Nhận ${info.reward} WebCoin (HMAC: ${result.blockHMAC?.substring(0, 8)}...)\n`;
                 refreshBalance();
                 loadInfo();
                 loadChain();
                 loadHistory();
                 
-                // Nghỉ 1 giây trước khi đào block tiếp theo
                 await new Promise(resolve => setTimeout(resolve, 1000));
             } else {
                 logDiv.innerHTML += `❌ Lỗi: ${result.error}\n`;
                 
-                // Nếu lỗi vì độ khó thấp, tự động tăng độ khó lên bằng mạng
                 if (result.error.includes('difficulty') && miningDifficulty < networkDifficulty) {
                     logDiv.innerHTML += `⚠️ Tự động tăng độ khó lên ${networkDifficulty} để phù hợp mạng\n`;
                     miningDifficulty = networkDifficulty;
@@ -606,14 +653,12 @@ async function startMining() {
     }
 }
 
-// Đào nhanh với độ khó thấp
 async function startSimpleMining() {
     if (!currentWallet.displayAddress) {
         showError('mining-log', 'Vui lòng đăng nhập trước');
         return;
     }
 
-    // Tạm thời đặt độ khó thấp
     const originalDifficulty = miningDifficulty;
     miningDifficulty = 2;
     
@@ -644,25 +689,32 @@ async function startSimpleMining() {
             to: p.to,
             amount: p.amount,
             timestamp: p.timestamp,
-            signature: p.signature
+            signature: p.signature,
+            salt: p.salt,
+            hmac: p.hmac
         }))];
 
         const latest = info.latestBlock;
+        const miningSalt = generateSalt(8);
+        
         const newBlock = {
             height: latest ? latest.height + 1 : 0,
             transactions,
             previousHash: latest ? latest.hash : "0",
             timestamp: Date.now(),
-            nonce: 0
+            nonce: 0,
+            miningSalt
         };
 
         function calculateBlockHash(block) {
             const txString = block.transactions.map(tx => JSON.stringify(tx)).join('');
-            return CryptoJS.SHA1(block.height + block.previousHash + block.timestamp + txString + block.nonce).toString();
+            return CryptoJS.SHA1(
+                block.height + block.previousHash + block.timestamp + txString + block.nonce + block.miningSalt
+            ).toString();
         }
 
         let hash = calculateBlockHash(newBlock);
-        const target = '00'; // Độ khó 2
+        const target = '00';
         let attempts = 0;
         const startTime = Date.now();
 
@@ -684,6 +736,14 @@ async function startSimpleMining() {
         logDiv.innerHTML += `🔗 Hash: ${hash}\n`;
         logDiv.innerHTML += `⏱️ Thời gian: ${totalTime}s\n`;
 
+        const workerSalt = generateSalt(16);
+        const blockHMAC = await generateHMAC({
+            height: newBlock.height,
+            hash: hash,
+            previousHash: newBlock.previousHash,
+            nonce: newBlock.nonce
+        }, currentWallet.privateKey, workerSalt);
+
         const submitData = {
             height: newBlock.height,
             transactions: newBlock.transactions,
@@ -691,7 +751,10 @@ async function startSimpleMining() {
             timestamp: newBlock.timestamp,
             nonce: newBlock.nonce,
             hash: hash,
-            minerAddress: currentWallet.displayAddress
+            minerAddress: currentWallet.displayAddress,
+            blockHMAC,
+            workerSalt,
+            miningSalt
         };
 
         const submitRes = await fetch('/api/blocks/submit', {
@@ -711,7 +774,6 @@ async function startSimpleMining() {
         } else {
             logDiv.innerHTML += `❌ Lỗi: ${result.error}\n`;
             
-            // Nếu lỗi vì độ khó, đề xuất tăng lên
             if (result.error.includes('difficulty')) {
                 logDiv.innerHTML += `💡 Gợi ý: Nên đặt độ khó >= ${networkDifficulty}\n`;
             }
@@ -720,23 +782,19 @@ async function startSimpleMining() {
     } catch (err) {
         logDiv.innerHTML += `❌ Lỗi: ${err.message}\n`;
     } finally {
-        // Khôi phục độ khó
         miningDifficulty = originalDifficulty;
         document.getElementById('difficulty-slider').value = miningDifficulty;
         document.getElementById('current-difficulty-display').innerText = miningDifficulty;
     }
 }
 
-// Gán sự kiện sau khi DOM tải
 document.addEventListener('DOMContentLoaded', () => {
-    // Tab switching
     document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', () => {
             showTab(tab.dataset.tab);
         });
     });
 
-    // Các nút chính
     document.getElementById('register-btn')?.addEventListener('click', registerWallet);
     document.getElementById('login-btn')?.addEventListener('click', loginWallet);
     document.getElementById('logout-btn')?.addEventListener('click', logoutWallet);
@@ -745,22 +803,17 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('mine-btn')?.addEventListener('click', startMining);
     document.getElementById('refresh-chain-btn')?.addEventListener('click', loadChain);
     
-    // History controls
     document.getElementById('history-filter')?.addEventListener('change', (e) => {
         historyFilter = e.target.value;
         displayHistory();
     });
     
     document.getElementById('refresh-history-btn')?.addEventListener('click', loadHistory);
-
-    // Thanh trượt độ khó
     document.getElementById('difficulty-slider')?.addEventListener('input', adjustMiningDifficulty);
 
-    // Khởi tạo
     loadInfo();
     loadChain();
 
-    // Tự động refresh balance
     setInterval(() => {
         if (currentWallet.displayAddress) refreshBalance();
     }, 10000);
