@@ -12,6 +12,11 @@ const char* SERVER_URL = "https://webcoin-1n9d.onrender.com/api";
 
 #define EEPROM_SIZE 512
 #define CONFIG_VERSION 0x02
+
+// FIX LED
+#ifndef LED_BUILTIN
+#define LED_BUILTIN 2
+#endif
 #define LED_PIN LED_BUILTIN
 
 struct Config {
@@ -30,7 +35,6 @@ volatile int blocksMined = 0;
 volatile int totalReward = 0;
 
 unsigned long startTime;
-bool running = true;
 
 // Hash
 String calculateHash(int height, String prevHash, unsigned long ts, String txStr, unsigned long nonce) {
@@ -71,8 +75,11 @@ bool login() {
         deserializeJson(doc, http.getString());
 
         if (doc["error"].isNull()) {
+
             if (!doc["publicKey"].isNull()) {
-                strcpy(config.publicKey, doc["publicKey"]);
+                String pk = doc["publicKey"].as<String>();
+                strncpy(config.publicKey, pk.c_str(), sizeof(config.publicKey) - 1);
+                config.publicKey[sizeof(config.publicKey) - 1] = '\0';
             }
 
             String cookie = http.header("Set-Cookie");
@@ -142,7 +149,6 @@ bool submitBlock(int height, unsigned long nonce, String hash, String prevHash, 
     doc["hash"] = hash;
     doc["minerAddress"] = String(config.wallet);
 
-    // TX string parse 
     DynamicJsonDocument txDoc(4096);
     deserializeJson(txDoc, txStr);
     doc["transactions"] = txDoc.as<JsonArray>();
@@ -189,12 +195,12 @@ void setup() {
         Serial.println("Nhap wallet:");
         while (!Serial.available());
         String w = Serial.readStringUntil('\n');
-        strcpy(config.wallet, w.c_str());
+        strncpy(config.wallet, w.c_str(), sizeof(config.wallet) - 1);
 
         Serial.println("Nhap password:");
         while (!Serial.available());
         String p = Serial.readStringUntil('\n');
-        strcpy(config.password, p.c_str());
+        strncpy(config.password, p.c_str(), sizeof(config.password) - 1);
 
         saveConfig();
     }
@@ -219,7 +225,7 @@ void setup() {
     startTime = millis();
 }
 
-// mining loop
+// loop
 void loop() {
 
     if (WiFi.status() != WL_CONNECTED) {
@@ -236,13 +242,13 @@ void loop() {
 
     JsonObject latest = info["latestBlock"];
 
-    int diff = config.difficulty > 0 ? config.difficulty : info["difficulty"];
-    int reward = info["reward"];
+    int diff = config.difficulty > 0 ? config.difficulty : info["difficulty"].as<int>();
+    int reward = info["reward"].as<int>();
 
     String target = "";
     for (int i = 0; i < diff; i++) target += "0";
 
-    int height = latest["height"] + 1;
+    int height = latest["height"].as<int>() + 1;
     String prevHash = latest["hash"].as<String>();
 
     DynamicJsonDocument pendingDoc(4096);
@@ -250,7 +256,6 @@ void loop() {
 
     unsigned long ts = time(nullptr) * 1000;
 
-    // coinbase
     txStr += "{\"from\":null,\"to\":\"" + String(config.publicKey) +
              "\",\"amount\":" + String(reward) +
              ",\"timestamp\":" + String(ts) +
@@ -266,7 +271,7 @@ void loop() {
 
     txStr += "]";
 
-    Serial.printf("\n📦 Block %d | diff %d\n", height, diff);
+    Serial.printf("\n[BLOCK] %d | diff %d\n", height, diff);
 
     unsigned long nonce = 0;
 
@@ -278,7 +283,7 @@ void loop() {
 
         if (hash.startsWith(target)) {
 
-            Serial.printf("\n🎯 FOUND nonce=%lu\n", nonce);
+            Serial.printf("\n[FOUND] nonce=%lu\n", nonce);
 
             if (submitBlock(height, nonce, hash, prevHash, reward, txStr)) {
                 blocksMined++;
@@ -290,7 +295,7 @@ void loop() {
 
         nonce++;
 
-        if (nonce % 5000 == 0) delay(0); // watchdog
+        if (nonce % 5000 == 0) delay(0);
     }
 
     delay(100);
