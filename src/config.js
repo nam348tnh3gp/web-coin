@@ -8,11 +8,26 @@ module.exports = {
     // Blockchain
     INITIAL_DIFFICULTY: parseInt(process.env.DIFFICULTY) || 3,
     MINING_REWARD: parseInt(process.env.MINING_REWARD) || 100,
-    MIN_REWARD: parseInt(process.env.MIN_REWARD) || 10,      // Phần thưởng tối thiểu
-    MAX_REWARD: parseInt(process.env.MAX_REWARD) || 200,     // Phần thưởng tối đa
-    BLOCK_TIME_TARGET: 60 * 1000, // 60 giây
+    MIN_REWARD: parseInt(process.env.MIN_REWARD) || 10,
+    MAX_REWARD: parseInt(process.env.MAX_REWARD) || 200,
+    BLOCK_TIME_TARGET: 60 * 1000,
     DIFFICULTY_ADJUSTMENT_INTERVAL: 10,
     MAX_PENDING_TRANSACTIONS: 1000,
+
+    // HMAC Configuration
+    HMAC_SECRET: process.env.HMAC_SECRET || 'webcoin-hmac-secret-key-2026',
+    HMAC_SALT_ROTATION_INTERVAL: 24 * 60 * 60 * 1000,
+    HMAC_MAX_AGE: 5 * 60 * 1000,
+    API_KEY_EXPIRY: 7 * 24 * 60 * 60 * 1000,
+
+    // Salt Configuration
+    SALT_LENGTH: 16,
+    BLOCK_SALT_LENGTH: 8,
+
+    // PoW Configuration
+    MIN_DIFFICULTY: 1,
+    MAX_DIFFICULTY: 10,
+    HASH_RATE_SAMPLES: 100,
 
     // Security
     JWT_SECRET: process.env.JWT_SECRET || 'your-very-strong-secret',
