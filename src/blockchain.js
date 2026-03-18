@@ -167,18 +167,24 @@ class Block {
         this.nonce = nonce;
         this.blockSalt = hmacManager.generateSalt(config.BLOCK_SALT_LENGTH);
         this.blockHMAC = null;
-        this.miningSalt = null; // Salt cho PoW
+        this.miningSalt = null;
         this.hash = this.calculateHash();
     }
 
     calculateHash() {
         const txString = this.transactions.map(tx => JSON.stringify(tx.toJSON())).join('');
-        const miningData = this.miningSalt ? 
-            this.height + this.previousHash + this.timestamp + txString + this.nonce + this.blockSalt + this.miningSalt :
-            this.height + this.previousHash + this.timestamp + txString + this.nonce + this.blockSalt;
+        
+        // THÊM miningSalt nếu có
+        let dataToHash = this.height + this.previousHash + this.timestamp + txString + this.nonce;
+        if (this.miningSalt) {
+            dataToHash += this.miningSalt;
+        }
+        if (this.blockSalt) {
+            dataToHash += this.blockSalt;
+        }
         
         return crypto.createHash('sha1')
-            .update(miningData)
+            .update(dataToHash)
             .digest('hex');
     }
 
@@ -240,7 +246,6 @@ class Block {
         const startTime = Date.now();
         let hashCount = 0;
         
-        // Tạo mining salt mới cho mỗi lần mine
         this.miningSalt = crypto.randomBytes(4).toString('hex');
         
         while (this.hash.substring(0, difficulty) !== target) {
@@ -248,7 +253,6 @@ class Block {
             this.hash = this.calculateHash();
             hashCount++;
             
-            // Báo cáo tiến độ mỗi 100k hash
             if (hashCount % 100000 === 0) {
                 const elapsed = (Date.now() - startTime) / 1000;
                 const hashrate = hashCount / elapsed;
@@ -496,18 +500,13 @@ class BlockchainController {
         }
     }
 
-    static validatePoW(block, difficulty) {
-        const target = '0'.repeat(difficulty);
-        return block.hash.startsWith(target);
-    }
-
     static getNetworkHashrate() {
         const blocks = BlockchainController.getAllBlocks(100);
         if (blocks.length < 2) return 0;
         
         const latestBlock = blocks[blocks.length - 1];
         const oldestBlock = blocks[0];
-        const timeSpan = (latestBlock.timestamp - oldestBlock.timestamp) / 1000; // seconds
+        const timeSpan = (latestBlock.timestamp - oldestBlock.timestamp) / 1000;
         const totalHashes = blocks.reduce((sum, block) => sum + block.nonce, 0);
         
         return totalHashes / timeSpan;
@@ -526,7 +525,6 @@ function initDatabase() {
         `);
         console.log('✅ Database schema updated with HMAC/Salt columns');
     } catch (e) {
-        // Columns may already exist
         console.log('ℹ️ Database schema already up to date');
     }
 }
