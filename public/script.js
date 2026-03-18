@@ -242,7 +242,7 @@ async function refreshBalance() {
     }
 }
 
-// ============== SỬA HÀM GỬI GIAO DỊCH ==============
+// ============== GỬI GIAO DỊCH ==============
 async function sendTransaction() {
     if (!currentWallet.privateKey) {
         showError('send-result', 'Vui lòng đăng nhập trước');
@@ -264,7 +264,7 @@ async function sendTransaction() {
     }
 
     const timestamp = Date.now();
-    const salt = generateSalt(16); // Tạo salt mới
+    const salt = generateSalt(16);
     
     const tx = {
         from: currentWallet.publicKey,
@@ -278,7 +278,6 @@ async function sendTransaction() {
     const key = ec.keyFromPrivate(currentWallet.privateKey);
     const signature = key.sign(hash).toDER('hex');
     
-    // Tạo HMAC cho transaction
     const hmac = await generateHMAC({
         from: tx.from,
         to: tx.to,
@@ -327,7 +326,6 @@ async function loadInfo() {
         document.getElementById('min-reward').innerText = data.minReward;
         document.getElementById('max-reward').innerText = data.maxReward;
         
-        // Hiển thị hashrate mạng
         if (data.networkHashrate) {
             document.getElementById('network-hashrate').innerText = data.networkHashrate + ' kH/s';
         }
@@ -462,7 +460,7 @@ function stopMining() {
     }
 }
 
-// ============== SỬA HÀM ĐÀO ==============
+// ============== HÀM ĐÀO CHÍNH - ĐÃ SỬA ==============
 async function startMining() {
     if (!currentWallet.displayAddress) {
         showError('mining-log', 'Vui lòng đăng nhập trước');
@@ -527,8 +525,21 @@ async function startMining() {
                 to: currentWallet.publicKey,
                 amount: info.reward,
                 timestamp: Date.now(),
-                signature: null
+                signature: null,
+                salt: generateSalt(16),
+                hmac: null
             };
+
+            // Tạo HMAC cho coinbase
+            const coinbaseHash = CryptoJS.SHA256(
+                coinbase.to + coinbase.amount + coinbase.timestamp + coinbase.salt
+            ).toString();
+            coinbase.hmac = await generateHMAC({
+                to: coinbase.to,
+                amount: coinbase.amount,
+                timestamp: coinbase.timestamp,
+                hash: coinbaseHash
+            }, currentWallet.privateKey, coinbase.salt);
 
             const transactions = [coinbase, ...pending.map(p => ({
                 from: p.from,
@@ -541,7 +552,10 @@ async function startMining() {
             }))];
 
             const latest = info.latestBlock;
-            const miningSalt = generateSalt(8); // Tạo mining salt mới cho mỗi block
+            
+            // Tạo salts cho block
+            const miningSalt = generateSalt(8);
+            const blockSalt = generateSalt(8);
             
             const newBlock = {
                 height: latest ? latest.height + 1 : 0,
@@ -549,19 +563,25 @@ async function startMining() {
                 previousHash: latest ? latest.hash : "0",
                 timestamp: Date.now(),
                 nonce: 0,
-                miningSalt
+                miningSalt,
+                blockSalt
             };
 
+            // Hàm tính hash block - ĐÃ SỬA để bao gồm blockSalt
             function calculateBlockHash(block) {
                 const txString = block.transactions.map(tx => JSON.stringify(tx)).join('');
-                return CryptoJS.SHA1(
-                    block.height + 
-                    block.previousHash + 
-                    block.timestamp + 
-                    txString + 
-                    block.nonce + 
-                    (block.miningSalt || '')
-                ).toString();
+                
+                // Format: height + previousHash + timestamp + txString + nonce + miningSalt + blockSalt
+                let dataToHash = block.height + block.previousHash + block.timestamp + txString + block.nonce;
+                
+                if (block.miningSalt) {
+                    dataToHash += block.miningSalt;
+                }
+                if (block.blockSalt) {
+                    dataToHash += block.blockSalt;
+                }
+                
+                return CryptoJS.SHA1(dataToHash).toString();
             }
 
             let hash = calculateBlockHash(newBlock);
@@ -571,6 +591,7 @@ async function startMining() {
 
             logDiv.innerHTML += `\n⛏️ Đào block #${newBlock.height} (độ khó: ${miningDifficulty}, mạng: ${networkDifficulty}, thưởng ${info.reward} WebCoin)\n`;
             logDiv.innerHTML += `   Mining Salt: ${miningSalt}\n`;
+            logDiv.innerHTML += `   Block Salt: ${blockSalt}\n`;
 
             while (!hash.startsWith(target) && isMining) {
                 newBlock.nonce++;
@@ -604,6 +625,17 @@ async function startMining() {
 
             logDiv.innerHTML += `🔐 Block HMAC: ${blockHMAC.substring(0, 16)}...\n`;
 
+            // Debug hash
+            console.log('=== DEBUG HASH ===');
+            console.log('Height:', newBlock.height);
+            console.log('PreviousHash:', newBlock.previousHash);
+            console.log('Timestamp:', newBlock.timestamp);
+            console.log('Nonce:', newBlock.nonce);
+            console.log('MiningSalt:', newBlock.miningSalt);
+            console.log('BlockSalt:', newBlock.blockSalt);
+            console.log('Hash tính được:', hash);
+            console.log('================');
+
             const submitData = {
                 height: newBlock.height,
                 transactions: newBlock.transactions,
@@ -614,7 +646,8 @@ async function startMining() {
                 minerAddress: currentWallet.displayAddress,
                 blockHMAC,
                 workerSalt,
-                miningSalt
+                miningSalt,
+                blockSalt
             };
 
             const submitRes = await fetch('/api/blocks/submit', {
@@ -681,8 +714,20 @@ async function startSimpleMining() {
             to: currentWallet.publicKey,
             amount: info.reward,
             timestamp: Date.now(),
-            signature: null
+            signature: null,
+            salt: generateSalt(16),
+            hmac: null
         };
+
+        const coinbaseHash = CryptoJS.SHA256(
+            coinbase.to + coinbase.amount + coinbase.timestamp + coinbase.salt
+        ).toString();
+        coinbase.hmac = await generateHMAC({
+            to: coinbase.to,
+            amount: coinbase.amount,
+            timestamp: coinbase.timestamp,
+            hash: coinbaseHash
+        }, currentWallet.privateKey, coinbase.salt);
 
         const transactions = [coinbase, ...pending.map(p => ({
             from: p.from,
@@ -696,6 +741,7 @@ async function startSimpleMining() {
 
         const latest = info.latestBlock;
         const miningSalt = generateSalt(8);
+        const blockSalt = generateSalt(8);
         
         const newBlock = {
             height: latest ? latest.height + 1 : 0,
@@ -703,14 +749,16 @@ async function startSimpleMining() {
             previousHash: latest ? latest.hash : "0",
             timestamp: Date.now(),
             nonce: 0,
-            miningSalt
+            miningSalt,
+            blockSalt
         };
 
         function calculateBlockHash(block) {
             const txString = block.transactions.map(tx => JSON.stringify(tx)).join('');
-            return CryptoJS.SHA1(
-                block.height + block.previousHash + block.timestamp + txString + block.nonce + block.miningSalt
-            ).toString();
+            let dataToHash = block.height + block.previousHash + block.timestamp + txString + block.nonce;
+            if (block.miningSalt) dataToHash += block.miningSalt;
+            if (block.blockSalt) dataToHash += block.blockSalt;
+            return CryptoJS.SHA1(dataToHash).toString();
         }
 
         let hash = calculateBlockHash(newBlock);
@@ -754,7 +802,8 @@ async function startSimpleMining() {
             minerAddress: currentWallet.displayAddress,
             blockHMAC,
             workerSalt,
-            miningSalt
+            miningSalt,
+            blockSalt
         };
 
         const submitRes = await fetch('/api/blocks/submit', {
@@ -788,6 +837,7 @@ async function startSimpleMining() {
     }
 }
 
+// Gán sự kiện sau khi DOM tải
 document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', () => {
