@@ -5,26 +5,27 @@
 #include "DSHA1.h"
 #include <time.h>
 
-// cấu hình
+// ===== CẤU HÌNH CHO ESP32-S3 =====
+// Chọn chế độ USB: 0 = Host (OTG), 1 = CDC (Serial qua USB)
 #define ARDUINO_USB_MODE 1           // 1 để dùng Serial qua USB
 #define ARDUINO_USB_CDC_ON_BOOT 1    // Bật CDC để dùng Serial monitor
 
-// LED 
+// LED pin cho ESP32-S3 (thường là GPIO48)
 #ifndef LED_BUILTIN
 #define LED_BUILTIN 48                // Đa số ESP32-S3 dùng GPIO48
 #endif
 
-// cấu hình mạng
+// ===== CẤU HÌNH MẠNG =====
 const char* WIFI_SSID = "your_wifi_ssid";        // Sửa tên WiFi
 const char* WIFI_PASS = "your_wifi_password";    // Sửa mật khẩu
 const char* SERVER_URL = "https://webcoin-1n9d.onrender.com/api";
 
-// cấu hình đào
+// ===== CẤU HÌNH ĐÀO =====
 int cpuThreads = 2;                    // Số luồng đào (tối đa 2 cho dual-core)
 int cpuPercent = 100;                  // 100% = không delay
 int difficultyOverride = 0;             // 0 = dùng độ khó từ server
 
-// biến toàn cục
+// ===== BIẾN TOÀN CỤC =====
 Preferences prefs;
 String walletAddress = "";
 String walletPassword = "";
@@ -44,10 +45,11 @@ portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
 // ===== HÀM BĂM TỐI ƯU CHO ESP32-S3 =====
 String calculateBlockHash(int height, String prevHash, unsigned long timestamp, JsonArray transactions, unsigned long nonce) {
+    // Sử dụng buffer tĩnh để giảm cấp phát bộ nhớ
     static char txBuffer[1024];
     static char dataBuffer[1024];
     
-    // Tạo chuỗi transactions 
+    // Tạo chuỗi transactions một lần
     txBuffer[0] = '\0';
     for (JsonVariant v : transactions) {
         String tmp;
@@ -76,7 +78,7 @@ String calculateBlockHash(int height, String prevHash, unsigned long timestamp, 
     return hash;
 }
 
-// hàm api
+// ===== HÀM API =====
 bool login() {
     HTTPClient http;
     http.begin(String(SERVER_URL) + "/login");
@@ -164,10 +166,10 @@ bool submitBlock(int height, unsigned long nonce, String hash, String prevHash, 
     return code == 200;
 }
 
-// kiểm tra mạng
+// ===== KIỂM TRA KẾT NỐI MẠNG =====
 bool checkWiFi() {
     if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("🔄 Mất WiFi, đang kết nối lại...");
+        Serial.println("[WiFi] Mat ket noi, dang ket noi lai...");
         WiFi.reconnect();
         
         int attempts = 0;
@@ -178,17 +180,17 @@ bool checkWiFi() {
         }
         
         if (WiFi.status() == WL_CONNECTED) {
-            Serial.println("\n✅ Đã kết nối lại WiFi");
+            Serial.println("\n[WiFi] Da ket noi lai!");
             return true;
         } else {
-            Serial.println("\n❌ Không thể kết nối lại WiFi");
+            Serial.println("\n[WiFi] Khong the ket noi lai!");
             return false;
         }
     }
     return true;
 }
 
-// task đào chính
+// ===== TASK ĐÀO CHÍNH =====
 void miningTask(void* p) {
     int id = (int)(intptr_t)p;
     
@@ -205,7 +207,7 @@ void miningTask(void* p) {
         // Lấy thông tin mạng
         DynamicJsonDocument info(4096);
         if (!getNetwork(info)) {
-            Serial.printf("❌ Task %d: Không lấy được thông tin mạng\n", id);
+            Serial.printf("[Task %d] Khong lay duoc thong tin mang\n", id);
             delay(2000);
             continue;
         }
@@ -243,7 +245,7 @@ void miningTask(void* p) {
         for (JsonObject t : pending) txs.add(t);
         
         if (id == 0) {
-            Serial.printf("\n🔨 [BLOCK %d] | TX: %d | Độ khó: %d | Thưởng: %d\n", 
+            Serial.printf("\n[BLOCK %d] TX: %d | Do kho: %d | Thuong: %d\n", 
                          height, (int)txs.size(), diff, reward);
         }
         
@@ -268,7 +270,7 @@ void miningTask(void* p) {
             
             // Kiểm tra kết quả
             if (strncmp(hash.c_str(), targetStr, diff) == 0) {
-                Serial.printf("\n🎉 [FOUND] Task %d | Nonce: %lu | Hash: %s\n", id, nonce, hash.c_str());
+                Serial.printf("\n[FOUND] Task %d | Nonce: %lu | Hash: %s\n", id, nonce, hash.c_str());
                 
                 if (submitBlock(height, nonce, hash, prevHash, reward, txs)) {
                     portENTER_CRITICAL(&mux);
@@ -276,9 +278,9 @@ void miningTask(void* p) {
                     totalReward += reward;
                     portEXIT_CRITICAL(&mux);
                     
-                    Serial.printf("✅ Block %d đã được chấp nhận! +%d WebCoin\n", height, reward);
+                    Serial.printf("[OK] Block %d duoc chap nhan! +%d WebCoin\n", height, reward);
                 } else {
-                    Serial.printf("❌ Block %d bị từ chối\n", height);
+                    Serial.printf("[FAIL] Block %d bi tu choi\n", height);
                 }
                 break;
             }
@@ -310,7 +312,7 @@ void setup() {
     Serial.begin(115200);
     delay(1000);
     
-    Serial.println("\n\n🚀 WebCoin Miner cho ESP32-S3");
+    Serial.println("\n\nWebCoin Miner cho ESP32-S3");
     Serial.println("=================================");
     
     // Khởi tạo LED
@@ -323,26 +325,26 @@ void setup() {
     walletPassword = prefs.getString("pass", "");
     
     if (walletAddress == "") {
-        Serial.println("📝 Chưa có thông tin ví!");
-        Serial.print("Nhập địa chỉ ví (dạng W_...): ");
+        Serial.println("[NHAP] Chua co thong tin vi!");
+        Serial.print("Nhap dia chi vi (dang W_...): ");
         while (!Serial.available());
         walletAddress = Serial.readStringUntil('\n');
         walletAddress.trim();
         
-        Serial.print("Nhập mật khẩu: ");
+        Serial.print("Nhap mat khau: ");
         while (!Serial.available());
         walletPassword = Serial.readStringUntil('\n');
         walletPassword.trim();
         
         prefs.putString("wallet", walletAddress);
         prefs.putString("pass", walletPassword);
-        Serial.println("✅ Đã lưu thông tin ví!");
+        Serial.println("[OK] Da luu thong tin vi!");
     } else {
-        Serial.println("✅ Đã đọc thông tin ví từ bộ nhớ");
+        Serial.println("[OK] Da doc thong tin vi tu bo nho");
     }
     
     // Kết nối WiFi
-    Serial.printf("\n📶 Đang kết nối WiFi: %s\n", WIFI_SSID);
+    Serial.printf("\n[WiFi] Dang ket noi: %s\n", WIFI_SSID);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     
     int wifiAttempts = 0;
@@ -353,14 +355,14 @@ void setup() {
     }
     
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.printf("\n✅ WiFi đã kết nối! IP: %s\n", WiFi.localIP().toString().c_str());
+        Serial.printf("\n[WiFi] Da ket noi! IP: %s\n", WiFi.localIP().toString().c_str());
     } else {
-        Serial.println("\n❌ Không thể kết nối WiFi!");
+        Serial.println("\n[WiFi] Khong the ket noi!");
         return;
     }
     
     // Đồng bộ thời gian
-    Serial.print("🕐 Đang đồng bộ thời gian...");
+    Serial.print("[NTP] Dang dong bo thoi gian...");
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
     
     time_t now = time(nullptr);
@@ -369,20 +371,20 @@ void setup() {
         Serial.print(".");
         now = time(nullptr);
     }
-    Serial.printf("\n✅ Thời gian: %s", ctime(&now));
+    Serial.printf("\n[NTP] Thoi gian: %s", ctime(&now));
     
     // Đăng nhập vào server
-    Serial.print("🔑 Đang đăng nhập...");
+    Serial.print("[LOGIN] Dang dang nhap...");
     if (!login()) {
-        Serial.println("\n❌ Đăng nhập thất bại!");
+        Serial.println("\n[LOGIN] That bai!");
         return;
     }
-    Serial.println(" ✅ Thành công!");
+    Serial.println(" Thanh cong!");
     
     startTime = millis();
     
     // Khởi tạo các task đào
-    Serial.printf("\n⛏️  Bắt đầu đào với %d luồng...\n", cpuThreads);
+    Serial.printf("\n[MINER] Bat dau dao voi %d luong...\n", cpuThreads);
     for (int i = 0; i < cpuThreads; i++) {
         xTaskCreatePinnedToCore(
             miningTask,           // Hàm task
@@ -395,13 +397,12 @@ void setup() {
         );
     }
     
-    Serial.println("\n✅ Miner đã sẵn sàng!\n");
+    Serial.println("\n[Miner] San sang!\n");
 }
 
 // ===== LOOP CHÍNH =====
 void loop() {
     static unsigned long lastStats = 0;
-    static unsigned long lastNetworkCheck = 0;
     
     delay(5000);  // Cập nhật mỗi 5 giây
     
@@ -416,11 +417,11 @@ void loop() {
         
         float speed = (hashes - lastStats) / elapsedSeconds;
         
-        Serial.printf("\n📊 [THỐNG KÊ] %02d:%02d:%02d\n", 
+        Serial.printf("\n[THONG KE] %02d:%02d:%02d\n", 
                      (now/3600000)%24, (now/60000)%60, (now/1000)%60);
-        Serial.printf("   ⚡ Tốc độ: %.2f H/s\n", speed);
-        Serial.printf("   📦 Blocks: %d\n", blocksMined);
-        Serial.printf("   💰 Tổng thưởng: %d WebCoin\n", totalReward);
+        Serial.printf("   Toc do: %.2f H/s\n", speed);
+        Serial.printf("   Blocks: %d\n", blocksMined);
+        Serial.printf("   Tong thuong: %d WebCoin\n", totalReward);
         
         lastStats = hashes;
         
