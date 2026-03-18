@@ -9,7 +9,7 @@
 #define LED_BUILTIN 2  // GPIO2 cho ESP32 thường
 #endif
 
-// cấu hình mạng 
+// cấu hình mạng
 const char* WIFI_SSID = "THANH PHONG";
 const char* WIFI_PASS = "matkhauwifi";
 const char* SERVER_URL = "https://webcoin-1n9d.onrender.com/api";
@@ -65,7 +65,7 @@ String calculateBlockHash(int height, String prevHash, unsigned long timestamp, 
     return hash;
 }
 
-// login(debug)
+// login (debug)
 bool login() {
     HTTPClient http;
     http.begin(String(SERVER_URL) + "/login");
@@ -306,7 +306,7 @@ void miningTask(void* p) {
     vTaskDelete(NULL);
 }
 
-// xoá thông tin cũ
+// 
 void resetWalletInfo() {
     Serial.println("\n----- RESET THONG TIN VI -----");
     prefs.clear();
@@ -339,9 +339,28 @@ void setup() {
     walletPublicKey = prefs.getString("pubkey", "");
     
     Serial.println("Thong tin hien tai:");
-    Serial.println("Dia chi vi: " + (walletAddress.length() > 0 ? walletAddress : "Chua co"));
-    Serial.println("Mat khau: " + (walletPassword.length() > 0 ? "Da luu" : "Chua co"));
-    Serial.println("PublicKey: " + (walletPublicKey.length() > 0 ? walletPublicKey : "Chua co"));
+    
+    // Tách dòng - ĐÃ SỬA LỖI
+    Serial.print("Dia chi vi: ");
+    if (walletAddress.length() > 0) {
+        Serial.println(walletAddress);
+    } else {
+        Serial.println("Chua co");
+    }
+    
+    Serial.print("Mat khau: ");
+    if (walletPassword.length() > 0) {
+        Serial.println("Da luu");
+    } else {
+        Serial.println("Chua co");
+    }
+    
+    Serial.print("PublicKey: ");
+    if (walletPublicKey.length() > 0) {
+        Serial.println(walletPublicKey);
+    } else {
+        Serial.println("Chua co");
+    }
     
     if (walletAddress.length() == 0 || walletPassword.length() == 0) {
         Serial.println("\n----- NHAP THONG TIN VI -----");
