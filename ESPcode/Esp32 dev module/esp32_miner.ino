@@ -6,20 +6,20 @@
 #include <time.h>
 
 #ifndef LED_BUILTIN
-#define LED_BUILTIN 2
+#define LED_BUILTIN 2  // GPIO2 cho ESP32 thường
 #endif
 
-// cấu hình mạng
-const char* WIFI_SSID = "your_wifi_ssid";        // Sửa tên WiFi
-const char* WIFI_PASS = "your_wifi_password";    // Sửa mật khẩu
+// cấu hình mạng 
+const char* WIFI_SSID = "THANH PHONG";
+const char* WIFI_PASS = "matkhauwifi";
 const char* SERVER_URL = "https://webcoin-1n9d.onrender.com/api";
 
-// cấu hình đào
+// cấu hình
 int cpuThreads = 2;                    // Số luồng đào (tối đa 2)
 int cpuPercent = 100;                  // 100% = không delay
 int difficultyOverride = 0;             // 0 = dùng độ khó từ server
 
-// biến toàn cục 
+// biến toàn cục
 Preferences prefs;
 String walletAddress = "";
 String walletPassword = "";
@@ -65,32 +65,68 @@ String calculateBlockHash(int height, String prevHash, unsigned long timestamp, 
     return hash;
 }
 
-// hàm api
+// login(debug)
 bool login() {
     HTTPClient http;
     http.begin(String(SERVER_URL) + "/login");
     http.addHeader("Content-Type", "application/json");
 
     String payload = "{\"displayAddress\":\"" + walletAddress + "\",\"password\":\"" + walletPassword + "\"}";
+    
+    Serial.println("\n----- DEBUG LOGIN -----");
+    Serial.println("Gui len server: " + payload);
+    
     int code = http.POST(payload);
-
+    Serial.printf("Ma phan hoi HTTP: %d\n", code);
+    
     if (code == 200) {
+        String response = http.getString();
+        Serial.println("Server tra ve: " + response);
+        
         DynamicJsonDocument doc(2048);
-        deserializeJson(doc, http.getString());
+        DeserializationError error = deserializeJson(doc, response);
+        
+        if (error) {
+            Serial.print("Loi parse JSON: ");
+            Serial.println(error.c_str());
+            http.end();
+            return false;
+        }
 
-        if (!doc.containsKey("error")) {
+        if (doc.containsKey("error") && !doc["error"].isNull()) {
+            Serial.println("Loi tu server: " + doc["error"].as<String>());
+            http.end();
+            return false;
+        }
+
+        if (doc.containsKey("publicKey")) {
             walletPublicKey = doc["publicKey"].as<String>();
+            Serial.println("PublicKey nhan duoc: " + walletPublicKey);
+        } else {
+            Serial.println("Khong tim thay publicKey trong response!");
+            http.end();
+            return false;
+        }
 
-            String cookie = http.header("Set-Cookie");
+        String cookie = http.header("Set-Cookie");
+        if (cookie.length() > 0) {
             int semi = cookie.indexOf(';');
             authCookie = semi > 0 ? cookie.substring(0, semi) : cookie;
-
-            http.end();
-            return true;
+            Serial.println("Cookie: " + authCookie);
+        } else {
+            Serial.println("Khong nhan duoc cookie!");
         }
+
+        http.end();
+        Serial.println("----- DANG NHAP THANH CONG -----\n");
+        return true;
+    } else {
+        String response = http.getString();
+        Serial.println("Loi response: " + response);
+        http.end();
+        Serial.println("----- DANG NHAP THAT BAI -----\n");
+        return false;
     }
-    http.end();
-    return false;
 }
 
 bool getNetwork(DynamicJsonDocument &doc) {
@@ -244,6 +280,8 @@ void miningTask(void* p) {
                     portEXIT_CRITICAL(&mux);
                     
                     Serial.printf("[OK] Block %d duoc chap nhan! +%d WebCoin\n", height, reward);
+                } else {
+                    Serial.printf("[FAIL] Block %d bi tu choi\n", height);
                 }
                 break;
             }
@@ -258,7 +296,7 @@ void miningTask(void* p) {
                 localHashCount = 0;
             }
             
-            // Cho ESP32 thường xử lý tác vụ nền
+            // Cho ESP32 xử lý tác vụ nền
             if (nonce % 1000 == 0) {
                 yield();
             }
@@ -268,33 +306,59 @@ void miningTask(void* p) {
     vTaskDelete(NULL);
 }
 
+// xoá thông tin cũ
+void resetWalletInfo() {
+    Serial.println("\n----- RESET THONG TIN VI -----");
+    prefs.clear();
+    walletAddress = "";
+    walletPassword = "";
+    walletPublicKey = "";
+    authCookie = "";
+    Serial.println("Da xoa thong tin cu. Khoi dong lai de nhap moi!");
+    delay(2000);
+    ESP.restart();
+}
+
 // setup
 void setup() {
     Serial.begin(115200);
     delay(1000);
     
-    Serial.println("\n\nWebCoin Miner cho ESP32");
-    Serial.println("================================");
+    Serial.println("\n\n=================================");
+    Serial.println("   WebCoin Miner cho ESP32");
+    Serial.println("=================================");
     
     pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, LOW);
     
     prefs.begin("webcoin", false);
+    
+    // Đọc thông tin ví
     walletAddress = prefs.getString("wallet", "");
     walletPassword = prefs.getString("pass", "");
+    walletPublicKey = prefs.getString("pubkey", "");
     
-    if (walletAddress == "") {
-        Serial.println("[NHAP] Chua co thong tin vi!");
-        Serial.print("Nhap dia chi vi (dang W_...): ");
+    Serial.println("Thong tin hien tai:");
+    Serial.println("Dia chi vi: " + (walletAddress.length() > 0 ? walletAddress : "Chua co"));
+    Serial.println("Mat khau: " + (walletPassword.length() > 0 ? "Da luu" : "Chua co"));
+    Serial.println("PublicKey: " + (walletPublicKey.length() > 0 ? walletPublicKey : "Chua co"));
+    
+    if (walletAddress.length() == 0 || walletPassword.length() == 0) {
+        Serial.println("\n----- NHAP THONG TIN VI -----");
+        
+        Serial.print("Nhap dia chi vi (bat dau bang W_...): ");
         while (!Serial.available());
         walletAddress = Serial.readStringUntil('\n');
         walletAddress.trim();
+        Serial.println("Da nhan: " + walletAddress);
         
         Serial.print("Nhap mat khau: ");
         while (!Serial.available());
         walletPassword = Serial.readStringUntil('\n');
         walletPassword.trim();
+        Serial.println("Da nhan: " + walletPassword);
         
+        // Lưu vào bộ nhớ
         prefs.putString("wallet", walletAddress);
         prefs.putString("pass", walletPassword);
         Serial.println("[OK] Da luu thong tin vi!");
@@ -302,11 +366,12 @@ void setup() {
         Serial.println("[OK] Da doc thong tin vi tu bo nho");
     }
     
+    // Kết nối WiFi
     Serial.printf("\n[WiFi] Dang ket noi: %s\n", WIFI_SSID);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     
     int wifiAttempts = 0;
-    while (WiFi.status() != WL_CONNECTED && wifiAttempts < 40) {
+    while (WiFi.status() != WL_CONNECTED && wifiAttempts < 60) {
         delay(500);
         Serial.print(".");
         wifiAttempts++;
@@ -315,38 +380,64 @@ void setup() {
     if (WiFi.status() == WL_CONNECTED) {
         Serial.printf("\n[WiFi] Da ket noi! IP: %s\n", WiFi.localIP().toString().c_str());
     } else {
-        Serial.println("\n[WiFi] Khong the ket noi!");
+        Serial.println("\n[WiFi] Khong the ket noi! Kiem tra lai ten va mat khau WiFi.");
         return;
     }
     
-    Serial.print("[NTP] Dang dong bo thoi gian...");
+    // Đồng bộ thời gian
+    Serial.print("[NTP] Dang dong bo thoi gian");
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
     
     time_t now = time(nullptr);
     int attempts = 0;
-    while (now < 100000 && attempts < 30) {
+    while (now < 100000 && attempts < 60) {
         delay(500);
         Serial.print(".");
         now = time(nullptr);
         attempts++;
     }
-    Serial.printf("\n[NTP] Thoi gian: %s", ctime(&now));
     
-    Serial.print("[LOGIN] Dang dang nhap...");
-    if (!login()) {
-        Serial.println("\n[LOGIN] That bai!");
+    if (now >= 100000) {
+        Serial.printf("\n[NTP] Thoi gian: %s", ctime(&now));
+    } else {
+        Serial.println("\n[NTP] Khong the dong bo thoi gian!");
         return;
     }
-    Serial.println(" Thanh cong!");
     
+    // Đăng nhập
+    if (!login()) {
+        Serial.println("\n[LOGIN] That bai! Kiem tra lai dia chi vi va mat khau.");
+        Serial.println("Ban co muon nhap lai khong? (y/n)");
+        
+        // Đợi 5 giây để người dùng quyết định
+        unsigned long timeout = millis() + 5000;
+        while (millis() < timeout) {
+            if (Serial.available()) {
+                char c = Serial.read();
+                if (c == 'y' || c == 'Y') {
+                    resetWalletInfo();
+                }
+            }
+            delay(100);
+        }
+        return;
+    }
+    
+    // Lưu publicKey nếu mới
+    if (walletPublicKey.length() == 0) {
+        prefs.putString("pubkey", walletPublicKey);
+    }
+    
+    Serial.println("[LOGIN] Thanh cong!");
     startTime = millis();
     
+    // Khởi tạo các task đào
     Serial.printf("\n[MINER] Bat dau dao voi %d luong...\n", cpuThreads);
     for (int i = 0; i < cpuThreads; i++) {
         xTaskCreatePinnedToCore(
             miningTask,
             "miner",
-            4096,                    // Stack nhỏ hơn cho ESP32 thường
+            4096,
             (void*)i,
             1,
             NULL,
@@ -354,30 +445,53 @@ void setup() {
         );
     }
     
-    Serial.println("\n[Miner] San sang!\n");
+    Serial.println("\n[Miner] San sang! Dang dao...\n");
 }
 
-// loop
+// loop chính
 void loop() {
     static unsigned long lastStats = 0;
     static unsigned long lastLedBlink = 0;
     static bool ledState = false;
+    static unsigned long lastLoginCheck = 0;
     
     delay(5000);
     
+    // Kiểm tra đăng nhập định kỳ
+    if (millis() - lastLoginCheck > 60000) { // Mỗi phút
+        if (authCookie.length() == 0) {
+            Serial.println("[WARN] Mat cookie, dang dang nhap lai...");
+            if (!login()) {
+                Serial.println("[ERROR] Khong the dang nhap lai!");
+            }
+        }
+        lastLoginCheck = millis();
+    }
+    
+    // Thống kê tốc độ
     unsigned long now = millis();
-    float speed = (totalHashes - lastStats) / 5.0;
+    float elapsedSeconds = (now - lastStats) / 1000.0;
     
-    Serial.printf("\n[THONG KE] %.2f H/s | Blocks: %d | Reward: %d\n",
-                  speed, blocksMined, totalReward);
-    
-    lastStats = totalHashes;
-    
-    // LED nhấp nháy theo tốc độ
-    int blinkInterval = (speed > 100) ? 100 : (speed > 10) ? 500 : 1000;
-    if (now - lastLedBlink > blinkInterval) {
-        ledState = !ledState;
-        digitalWrite(LED_BUILTIN, ledState ? HIGH : LOW);
-        lastLedBlink = now;
+    if (lastStats > 0 && elapsedSeconds > 0) {
+        portENTER_CRITICAL(&mux);
+        unsigned long hashes = totalHashes;
+        portEXIT_CRITICAL(&mux);
+        
+        float speed = (hashes - lastStats) / elapsedSeconds;
+        
+        Serial.printf("\n[THONG KE] %.2f H/s | Blocks: %d | Reward: %d\n",
+                      speed, blocksMined, totalReward);
+        
+        lastStats = hashes;
+        
+        // LED nhấp nháy theo tốc độ
+        int blinkInterval = (speed > 100) ? 100 : (speed > 10) ? 500 : 1000;
+        if (now - lastLedBlink > blinkInterval) {
+            ledState = !ledState;
+            digitalWrite(LED_BUILTIN, ledState ? HIGH : LOW);
+            lastLedBlink = now;
+        }
+    } else {
+        lastStats = totalHashes;
     }
 }
