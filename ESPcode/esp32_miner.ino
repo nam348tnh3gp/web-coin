@@ -170,13 +170,13 @@ void miningTask(void* p) {
 
         JsonObject latest = info["latestBlock"];
 
-        int diff = difficultyOverride > 0 ? difficultyOverride : info["difficulty"];
-        int reward = info["reward"];
+        int diff = difficultyOverride > 0 ? difficultyOverride : info["difficulty"].as<int>();
+        int reward = info["reward"].as<int>();
 
         String target = "";
         for (int i = 0; i < diff; i++) target += "0";
 
-        int height = latest["height"] + 1;
+        int height = latest["height"].as<int>() + 1;
         String prevHash = latest["hash"].as<String>();
 
         DynamicJsonDocument pendingDoc(8192);
@@ -198,7 +198,7 @@ void miningTask(void* p) {
         for (JsonObject t : pending) txs.add(t);
 
         if (id == 0) {
-            Serial.printf("\n📦 Block %d | TX: %d | diff: %d\n", height, txs.size(), diff);
+            Serial.printf("\n[BLOCK] %d | TX: %d | diff: %d\n", height, (int)txs.size(), diff);
         }
 
         unsigned long nonce = id * 10000000UL;
@@ -207,14 +207,15 @@ void miningTask(void* p) {
 
             if (nonce % 5000 == 0) {
                 timestamp = time(nullptr) * 1000;
-                txs[0]["timestamp"] = timestamp;
+                // bảo đảm txs[0] tồn tại
+                if (txs.size() > 0) txs[0]["timestamp"] = timestamp;
             }
 
             String hash = calculateBlockHash(height, prevHash, timestamp, txs, nonce);
 
             if (hash.startsWith(target)) {
 
-                Serial.printf("\n🎯 FOUND T%d nonce=%lu\n", id, nonce);
+                Serial.printf("\n[FOUND] T%d nonce=%lu\n", id, nonce);
 
                 if (submitBlock(height, nonce, hash, prevHash, reward, txs)) {
                     portENTER_CRITICAL(&mux);
@@ -299,7 +300,7 @@ void loop() {
     unsigned long now = millis();
     float speed = (totalHashes - last) / 5.0;
 
-    Serial.printf("\n📊 Speed: %.2f H/s | Blocks: %d | Reward: %d\n",
+    Serial.printf("\n[SPEED] %.2f H/s | Blocks: %d | Reward: %d\n",
                   speed, blocksMined, totalReward);
 
     last = totalHashes;
