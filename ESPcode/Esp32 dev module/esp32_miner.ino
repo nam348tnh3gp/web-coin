@@ -1,25 +1,23 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include "DSHA1.h"
 #include <time.h>
 
 #ifndef LED_BUILTIN
-#define LED_BUILTIN 2  // GPIO2 cho ESP32 thường
+#define LED_BUILTIN 2
 #endif
 
-// cấu hình mạng
 const char* WIFI_SSID = "THANH PHONG";
 const char* WIFI_PASS = "matkhauwifi";
 const char* SERVER_URL = "https://webcoin-1n9d.onrender.com/api";
 
-// cấu hình
-int cpuThreads = 2;                    // Số luồng đào (tối đa 2)
-int cpuPercent = 100;                  // 100% = không delay
-int difficultyOverride = 0;             // 0 = dùng độ khó từ server
+int cpuThreads = 2;
+int cpuPercent = 100;
+int difficultyOverride = 0;
 
-// biến toàn cục
 Preferences prefs;
 String walletAddress = "";
 String walletPassword = "";
@@ -35,7 +33,6 @@ unsigned long startTime;
 
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
-// hàm băm
 String calculateBlockHash(int height, String prevHash, unsigned long timestamp, JsonArray transactions, unsigned long nonce) {
     static char txBuffer[1024];
     static char dataBuffer[1024];
@@ -65,10 +62,17 @@ String calculateBlockHash(int height, String prevHash, unsigned long timestamp, 
     return hash;
 }
 
-// login (debug)
 bool login() {
+    WiFiClientSecure *client = new WiFiClientSecure;
+    if(!client) {
+        Serial.println("Khong the tao WiFiClientSecure");
+        return false;
+    }
+    
+    client->setInsecure();
+    
     HTTPClient http;
-    http.begin(String(SERVER_URL) + "/login");
+    http.begin(*client, String(SERVER_URL) + "/login");
     http.addHeader("Content-Type", "application/json");
 
     String payload = "{\"displayAddress\":\"" + walletAddress + "\",\"password\":\"" + walletPassword + "\"}";
@@ -79,93 +83,127 @@ bool login() {
     int code = http.POST(payload);
     Serial.printf("Ma phan hoi HTTP: %d\n", code);
     
-    if (code == 200) {
-        String response = http.getString();
-        Serial.println("Server tra ve: " + response);
-        
-        DynamicJsonDocument doc(2048);
-        DeserializationError error = deserializeJson(doc, response);
-        
-        if (error) {
-            Serial.print("Loi parse JSON: ");
-            Serial.println(error.c_str());
-            http.end();
-            return false;
-        }
+    if (code > 0) {
+        if (code == 200) {
+            String response = http.getString();
+            Serial.println("Server tra ve: " + response);
+            
+            DynamicJsonDocument doc(2048);
+            DeserializationError error = deserializeJson(doc, response);
+            
+            if (error) {
+                Serial.print("Loi parse JSON: ");
+                Serial.println(error.c_str());
+                http.end();
+                delete client;
+                return false;
+            }
 
-        if (doc.containsKey("error") && !doc["error"].isNull()) {
-            Serial.println("Loi tu server: " + doc["error"].as<String>());
-            http.end();
-            return false;
-        }
+            if (doc.containsKey("error") && !doc["error"].isNull()) {
+                Serial.println("Loi tu server: " + doc["error"].as<String>());
+                http.end();
+                delete client;
+                return false;
+            }
 
-        if (doc.containsKey("publicKey")) {
-            walletPublicKey = doc["publicKey"].as<String>();
-            Serial.println("PublicKey nhan duoc: " + walletPublicKey);
+            if (doc.containsKey("publicKey")) {
+                walletPublicKey = doc["publicKey"].as<String>();
+                Serial.println("PublicKey nhan duoc: " + walletPublicKey);
+            } else {
+                Serial.println("Khong tim thay publicKey trong response!");
+                http.end();
+                delete client;
+                return false;
+            }
+
+            String cookie = http.header("Set-Cookie");
+            if (cookie.length() > 0) {
+                int semi = cookie.indexOf(';');
+                authCookie = semi > 0 ? cookie.substring(0, semi) : cookie;
+                Serial.println("Cookie: " + authCookie);
+            } else {
+                Serial.println("Khong nhan duoc cookie!");
+            }
+
+            http.end();
+            delete client;
+            Serial.println("----- DANG NHAP THANH CONG -----\n");
+            return true;
         } else {
-            Serial.println("Khong tim thay publicKey trong response!");
+            String response = http.getString();
+            Serial.println("Loi response: " + response);
             http.end();
+            delete client;
+            Serial.println("----- DANG NHAP THAT BAI -----\n");
             return false;
         }
-
-        String cookie = http.header("Set-Cookie");
-        if (cookie.length() > 0) {
-            int semi = cookie.indexOf(';');
-            authCookie = semi > 0 ? cookie.substring(0, semi) : cookie;
-            Serial.println("Cookie: " + authCookie);
-        } else {
-            Serial.println("Khong nhan duoc cookie!");
-        }
-
-        http.end();
-        Serial.println("----- DANG NHAP THANH CONG -----\n");
-        return true;
     } else {
-        String response = http.getString();
-        Serial.println("Loi response: " + response);
+        Serial.println("Khong the ket noi den server!");
+        Serial.println("Kiem tra:");
+        Serial.println("1. Duong dan server: " + String(SERVER_URL));
+        Serial.println("2. ESP32 co internet khong?");
+        Serial.println("3. Server dang hoat dong khong?");
         http.end();
-        Serial.println("----- DANG NHAP THAT BAI -----\n");
+        delete client;
         return false;
     }
 }
 
 bool getNetwork(DynamicJsonDocument &doc) {
+    WiFiClientSecure *client = new WiFiClientSecure;
+    if(!client) return false;
+    
+    client->setInsecure();
     HTTPClient http;
-    http.begin(String(SERVER_URL) + "/info");
+    http.begin(*client, String(SERVER_URL) + "/info");
     if (authCookie.length()) http.addHeader("Cookie", authCookie);
 
     int code = http.GET();
+    bool success = false;
+    
     if (code == 200) {
         String res = http.getString();
         http.end();
         if (!deserializeJson(doc, res) && doc.containsKey("latestBlock")) {
-            return true;
+            success = true;
         }
     }
     http.end();
-    return false;
+    delete client;
+    return success;
 }
 
 bool getPending(DynamicJsonDocument &doc) {
+    WiFiClientSecure *client = new WiFiClientSecure;
+    if(!client) return false;
+    
+    client->setInsecure();
     HTTPClient http;
-    http.begin(String(SERVER_URL) + "/pending");
+    http.begin(*client, String(SERVER_URL) + "/pending");
     if (authCookie.length()) http.addHeader("Cookie", authCookie);
 
     int code = http.GET();
+    bool success = false;
+    
     if (code == 200) {
         String res = http.getString();
         http.end();
         if (!deserializeJson(doc, res) && doc.size() > 0) {
-            return true;
+            success = true;
         }
     }
     http.end();
-    return false;
+    delete client;
+    return success;
 }
 
 bool submitBlock(int height, unsigned long nonce, String hash, String prevHash, int reward, JsonArray transactions) {
+    WiFiClientSecure *client = new WiFiClientSecure;
+    if(!client) return false;
+    
+    client->setInsecure();
     HTTPClient http;
-    http.begin(String(SERVER_URL) + "/blocks/submit");
+    http.begin(*client, String(SERVER_URL) + "/blocks/submit");
     http.addHeader("Content-Type", "application/json");
     if (authCookie.length()) http.addHeader("Cookie", authCookie);
 
@@ -185,11 +223,11 @@ bool submitBlock(int height, unsigned long nonce, String hash, String prevHash, 
 
     int code = http.POST(payload);
     http.end();
+    delete client;
 
     return code == 200;
 }
 
-// check wifi
 bool checkWiFi() {
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("[WiFi] Mat ket noi, dang ket noi lai...");
@@ -213,7 +251,6 @@ bool checkWiFi() {
     return true;
 }
 
-// task đào
 void miningTask(void* p) {
     int id = (int)(intptr_t)p;
     char targetStr[32];
@@ -296,7 +333,6 @@ void miningTask(void* p) {
                 localHashCount = 0;
             }
             
-            // Cho ESP32 xử lý tác vụ nền
             if (nonce % 1000 == 0) {
                 yield();
             }
@@ -306,7 +342,6 @@ void miningTask(void* p) {
     vTaskDelete(NULL);
 }
 
-// 
 void resetWalletInfo() {
     Serial.println("\n----- RESET THONG TIN VI -----");
     prefs.clear();
@@ -319,7 +354,6 @@ void resetWalletInfo() {
     ESP.restart();
 }
 
-// setup
 void setup() {
     Serial.begin(115200);
     delay(1000);
@@ -333,14 +367,12 @@ void setup() {
     
     prefs.begin("webcoin", false);
     
-    // Đọc thông tin ví
     walletAddress = prefs.getString("wallet", "");
     walletPassword = prefs.getString("pass", "");
     walletPublicKey = prefs.getString("pubkey", "");
     
     Serial.println("Thong tin hien tai:");
     
-    // Tách dòng - ĐÃ SỬA LỖI
     Serial.print("Dia chi vi: ");
     if (walletAddress.length() > 0) {
         Serial.println(walletAddress);
@@ -377,7 +409,6 @@ void setup() {
         walletPassword.trim();
         Serial.println("Da nhan: " + walletPassword);
         
-        // Lưu vào bộ nhớ
         prefs.putString("wallet", walletAddress);
         prefs.putString("pass", walletPassword);
         Serial.println("[OK] Da luu thong tin vi!");
@@ -385,7 +416,6 @@ void setup() {
         Serial.println("[OK] Da doc thong tin vi tu bo nho");
     }
     
-    // Kết nối WiFi
     Serial.printf("\n[WiFi] Dang ket noi: %s\n", WIFI_SSID);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     
@@ -403,7 +433,6 @@ void setup() {
         return;
     }
     
-    // Đồng bộ thời gian
     Serial.print("[NTP] Dang dong bo thoi gian");
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
     
@@ -423,12 +452,10 @@ void setup() {
         return;
     }
     
-    // Đăng nhập
     if (!login()) {
         Serial.println("\n[LOGIN] That bai! Kiem tra lai dia chi vi va mat khau.");
         Serial.println("Ban co muon nhap lai khong? (y/n)");
         
-        // Đợi 5 giây để người dùng quyết định
         unsigned long timeout = millis() + 5000;
         while (millis() < timeout) {
             if (Serial.available()) {
@@ -442,7 +469,6 @@ void setup() {
         return;
     }
     
-    // Lưu publicKey nếu mới
     if (walletPublicKey.length() == 0) {
         prefs.putString("pubkey", walletPublicKey);
     }
@@ -450,7 +476,6 @@ void setup() {
     Serial.println("[LOGIN] Thanh cong!");
     startTime = millis();
     
-    // Khởi tạo các task đào
     Serial.printf("\n[MINER] Bat dau dao voi %d luong...\n", cpuThreads);
     for (int i = 0; i < cpuThreads; i++) {
         xTaskCreatePinnedToCore(
@@ -467,7 +492,6 @@ void setup() {
     Serial.println("\n[Miner] San sang! Dang dao...\n");
 }
 
-// loop chính
 void loop() {
     static unsigned long lastStats = 0;
     static unsigned long lastLedBlink = 0;
@@ -476,8 +500,7 @@ void loop() {
     
     delay(5000);
     
-    // Kiểm tra đăng nhập định kỳ
-    if (millis() - lastLoginCheck > 60000) { // Mỗi phút
+    if (millis() - lastLoginCheck > 60000) {
         if (authCookie.length() == 0) {
             Serial.println("[WARN] Mat cookie, dang dang nhap lai...");
             if (!login()) {
@@ -487,7 +510,6 @@ void loop() {
         lastLoginCheck = millis();
     }
     
-    // Thống kê tốc độ
     unsigned long now = millis();
     float elapsedSeconds = (now - lastStats) / 1000.0;
     
@@ -503,7 +525,6 @@ void loop() {
         
         lastStats = hashes;
         
-        // LED nhấp nháy theo tốc độ
         int blinkInterval = (speed > 100) ? 100 : (speed > 10) ? 500 : 1000;
         if (now - lastLedBlink > blinkInterval) {
             ledState = !ledState;
