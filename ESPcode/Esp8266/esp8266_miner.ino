@@ -1,4 +1,3 @@
-```cpp
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiClientSecure.h>
@@ -433,4 +432,3 @@ void loop() {
 
     delay(100);
 }
-```
