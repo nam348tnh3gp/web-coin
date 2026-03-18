@@ -4,31 +4,131 @@ const ec = new EC('secp256k1');
 const db = require('./db');
 const config = require('./config');
 
+// ============== HMAC MANAGER ==============
+class HMACManager {
+    constructor() {
+        this.secretKey = config.HMAC_SECRET;
+        this.saltRotationInterval = config.HMAC_SALT_ROTATION_INTERVAL;
+        this.maxAge = config.HMAC_MAX_AGE;
+        this.saltLength = config.SALT_LENGTH;
+        this.blockSaltLength = config.BLOCK_SALT_LENGTH;
+        this.currentSalt = crypto.randomBytes(32).toString('hex');
+        this.lastSaltRotation = Date.now();
+    }
+
+    generateSalt(length = this.saltLength) {
+        return crypto.randomBytes(length).toString('hex');
+    }
+
+    rotateSaltIfNeeded() {
+        if (Date.now() - this.lastSaltRotation > this.saltRotationInterval) {
+            this.currentSalt = crypto.randomBytes(32).toString('hex');
+            this.lastSaltRotation = Date.now();
+            console.log('🔄 HMAC salt rotated');
+        }
+    }
+
+    sign(data, customSalt = null) {
+        this.rotateSaltIfNeeded();
+        const salt = customSalt || this.currentSalt;
+        const hmac = crypto.createHmac('sha256', this.secretKey + salt);
+        
+        const dataString = typeof data === 'string' ? data : JSON.stringify(data);
+        hmac.update(dataString);
+        
+        return {
+            signature: hmac.digest('hex'),
+            salt: salt,
+            timestamp: Date.now()
+        };
+    }
+
+    verify(data, signature, salt, maxAge = this.maxAge) {
+        const hmac = crypto.createHmac('sha256', this.secretKey + salt);
+        const dataString = typeof data === 'string' ? data : JSON.stringify(data);
+        hmac.update(dataString);
+        
+        const calculated = hmac.digest('hex');
+        return calculated === signature;
+    }
+
+    generateAPIKey(userId) {
+        const salt = this.generateSalt();
+        const data = {
+            userId,
+            created: Date.now(),
+            nonce: crypto.randomBytes(8).toString('hex')
+        };
+        
+        const { signature } = this.sign(data, salt);
+        
+        return {
+            apiKey: Buffer.from(JSON.stringify(data)).toString('base64'),
+            signature,
+            salt
+        };
+    }
+}
+
+const hmacManager = new HMACManager();
+
 class Transaction {
     constructor(from, to, amount, timestamp = Date.now()) {
-        this.from = from;        // public key hex (null cho coinbase)
+        this.from = from;
         this.to = to;
         this.amount = amount;
         this.timestamp = timestamp;
         this.signature = null;
+        this.salt = hmacManager.generateSalt();
+        this.hmac = null;
     }
 
-    // Dùng SHA-256 cho giao dịch
     hash() {
         return crypto.createHash('sha256')
-            .update(this.from + this.to + this.amount + this.timestamp)
+            .update(this.from + this.to + this.amount + this.timestamp + this.salt)
             .digest('hex');
+    }
+
+    generateHMAC() {
+        const txData = {
+            from: this.from,
+            to: this.to,
+            amount: this.amount,
+            timestamp: this.timestamp,
+            hash: this.hash()
+        };
+        
+        const { signature } = hmacManager.sign(txData, this.salt);
+        this.hmac = signature;
+        return signature;
+    }
+
+    verifyHMAC() {
+        if (!this.hmac) return false;
+        
+        const txData = {
+            from: this.from,
+            to: this.to,
+            amount: this.amount,
+            timestamp: this.timestamp,
+            hash: this.hash()
+        };
+        
+        return hmacManager.verify(txData, this.hmac, this.salt);
     }
 
     sign(privateKey) {
         const key = ec.keyFromPrivate(privateKey, 'hex');
         const sig = key.sign(this.hash());
         this.signature = sig.toDER('hex');
+        this.generateHMAC();
     }
 
     isValid() {
-        if (this.from === null) return true; // coinbase
+        if (this.from === null) return true;
         if (!this.signature) return false;
+        if (!this.verifyHMAC()) return false;
+        
         try {
             const key = ec.keyFromPublic(this.from, 'hex');
             return key.verify(this.hash(), this.signature);
@@ -43,13 +143,17 @@ class Transaction {
             to: this.to,
             amount: this.amount,
             timestamp: this.timestamp,
-            signature: this.signature
+            signature: this.signature,
+            salt: this.salt,
+            hmac: this.hmac
         };
     }
 
     static fromJSON(json) {
         const tx = new Transaction(json.from, json.to, json.amount, json.timestamp);
         tx.signature = json.signature;
+        tx.salt = json.salt || hmacManager.generateSalt();
+        tx.hmac = json.hmac || null;
         return tx;
     }
 }
@@ -61,23 +165,108 @@ class Block {
         this.transactions = transactions;
         this.previousHash = previousHash;
         this.nonce = nonce;
+        this.blockSalt = hmacManager.generateSalt(config.BLOCK_SALT_LENGTH);
+        this.blockHMAC = null;
+        this.miningSalt = null; // Salt cho PoW
         this.hash = this.calculateHash();
     }
 
-    // Dùng SHA-1 cho block (Proof-of-Work)
     calculateHash() {
         const txString = this.transactions.map(tx => JSON.stringify(tx.toJSON())).join('');
+        const miningData = this.miningSalt ? 
+            this.height + this.previousHash + this.timestamp + txString + this.nonce + this.blockSalt + this.miningSalt :
+            this.height + this.previousHash + this.timestamp + txString + this.nonce + this.blockSalt;
+        
         return crypto.createHash('sha1')
-            .update(this.height + this.previousHash + this.timestamp + txString + this.nonce)
+            .update(miningData)
             .digest('hex');
+    }
+
+    generateBlockHMAC() {
+        const blockData = {
+            height: this.height,
+            hash: this.hash,
+            previousHash: this.previousHash,
+            timestamp: this.timestamp,
+            nonce: this.nonce,
+            txCount: this.transactions.length,
+            merkleRoot: this.calculateMerkleRoot()
+        };
+        
+        const { signature } = hmacManager.sign(blockData, this.blockSalt);
+        this.blockHMAC = signature;
+        return signature;
+    }
+
+    verifyBlockHMAC() {
+        if (!this.blockHMAC) return false;
+        
+        const blockData = {
+            height: this.height,
+            hash: this.hash,
+            previousHash: this.previousHash,
+            timestamp: this.timestamp,
+            nonce: this.nonce,
+            txCount: this.transactions.length,
+            merkleRoot: this.calculateMerkleRoot()
+        };
+        
+        return hmacManager.verify(blockData, this.blockHMAC, this.blockSalt);
+    }
+
+    calculateMerkleRoot() {
+        if (this.transactions.length === 0) return crypto.createHash('sha256').digest('hex');
+        
+        let hashes = this.transactions.map(tx => tx.hash());
+        
+        while (hashes.length > 1) {
+            if (hashes.length % 2 !== 0) {
+                hashes.push(hashes[hashes.length - 1]);
+            }
+            
+            const newHashes = [];
+            for (let i = 0; i < hashes.length; i += 2) {
+                const combined = hashes[i] + hashes[i + 1];
+                newHashes.push(crypto.createHash('sha256').update(combined).digest('hex'));
+            }
+            hashes = newHashes;
+        }
+        
+        return hashes[0];
     }
 
     mine(difficulty) {
         const target = '0'.repeat(difficulty);
+        const startTime = Date.now();
+        let hashCount = 0;
+        
+        // Tạo mining salt mới cho mỗi lần mine
+        this.miningSalt = crypto.randomBytes(4).toString('hex');
+        
         while (this.hash.substring(0, difficulty) !== target) {
             this.nonce++;
             this.hash = this.calculateHash();
+            hashCount++;
+            
+            // Báo cáo tiến độ mỗi 100k hash
+            if (hashCount % 100000 === 0) {
+                const elapsed = (Date.now() - startTime) / 1000;
+                const hashrate = hashCount / elapsed;
+                console.log(`⛏️  Mining... Nonce: ${this.nonce}, Hashrate: ${(hashrate/1000).toFixed(2)} kH/s`);
+            }
         }
+        
+        this.generateBlockHMAC();
+        
+        const mineTime = (Date.now() - startTime) / 1000;
+        const finalHashrate = hashCount / mineTime;
+        
+        console.log(`✅ Block #${this.height} mined in ${mineTime.toFixed(2)}s`);
+        console.log(`   • Nonce: ${this.nonce}`);
+        console.log(`   • Hash: ${this.hash.substring(0, 20)}...`);
+        console.log(`   • Hashrate: ${(finalHashrate/1000).toFixed(2)} kH/s`);
+        console.log(`   • HMAC: ${this.blockHMAC.substring(0, 16)}...`);
+        
         return this;
     }
 
@@ -95,7 +284,11 @@ class Block {
             previousHash: this.previousHash,
             timestamp: this.timestamp,
             nonce: this.nonce,
-            transactions: this.transactions.map(tx => tx.toJSON())
+            blockSalt: this.blockSalt,
+            blockHMAC: this.blockHMAC,
+            miningSalt: this.miningSalt,
+            transactions: this.transactions.map(tx => tx.toJSON()),
+            merkleRoot: this.calculateMerkleRoot()
         };
     }
 
@@ -103,23 +296,20 @@ class Block {
         const txs = json.transactions.map(t => Transaction.fromJSON(t));
         const block = new Block(json.height, txs, json.previousHash, json.timestamp, json.nonce);
         block.hash = json.hash;
+        block.blockSalt = json.blockSalt || hmacManager.generateSalt(config.BLOCK_SALT_LENGTH);
+        block.blockHMAC = json.blockHMAC || null;
+        block.miningSalt = json.miningSalt || null;
         return block;
     }
 }
 
 class BlockchainController {
-    // Hàm tính phần thưởng dựa trên độ khó
     static calculateReward(difficulty) {
-        // Công thức: reward = min_reward + (difficulty * (max_reward - min_reward) / max_difficulty)
-        // Giả sử max_difficulty = 10
         const maxDifficulty = 10;
         const minReward = config.MIN_REWARD;
         const maxReward = config.MAX_REWARD;
         
-        // Tính phần thưởng tỷ lệ thuận với độ khó
         let reward = minReward + (difficulty * (maxReward - minReward) / maxDifficulty);
-        
-        // Làm tròn và đảm bảo trong khoảng cho phép
         reward = Math.round(reward);
         reward = Math.min(maxReward, Math.max(minReward, reward));
         
@@ -173,27 +363,42 @@ class BlockchainController {
     }
 
     static addBlock(block) {
+        if (!block.verifyBlockHMAC()) {
+            throw new Error('Invalid block HMAC signature');
+        }
+        
         const addBlockTx = db.transaction((block) => {
-            // Lưu block
             const stmt = db.prepare(`
-                INSERT INTO blocks (height, hash, previous_hash, timestamp, nonce, transactions)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO blocks (
+                    height, hash, previous_hash, timestamp, nonce, 
+                    transactions, block_salt, block_hmac, mining_salt, merkle_root
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `);
-            stmt.run(block.height, block.hash, block.previousHash, block.timestamp, block.nonce, JSON.stringify(block.transactions.map(tx => tx.toJSON())));
+            
+            stmt.run(
+                block.height, 
+                block.hash, 
+                block.previousHash, 
+                block.timestamp, 
+                block.nonce, 
+                JSON.stringify(block.transactions.map(tx => tx.toJSON())),
+                block.blockSalt,
+                block.blockHMAC,
+                block.miningSalt,
+                block.calculateMerkleRoot()
+            );
 
-            // Cập nhật balances
             for (const tx of block.transactions) {
                 if (tx.from === null) {
-                    // Coinbase: cộng cho người nhận
                     db.prepare(`
                         INSERT INTO balances (address, balance) VALUES (?, ?)
                         ON CONFLICT(address) DO UPDATE SET balance = balance + excluded.balance
                     `).run(tx.to, tx.amount);
                 } else {
-                    // Giao dịch thường: trừ người gửi, cộng người nhận
                     db.prepare(`
                         UPDATE balances SET balance = balance - ? WHERE address = ?
                     `).run(tx.amount, tx.from);
+                    
                     db.prepare(`
                         INSERT INTO balances (address, balance) VALUES (?, ?)
                         ON CONFLICT(address) DO UPDATE SET balance = balance + ?
@@ -206,11 +411,27 @@ class BlockchainController {
     }
 
     static addToMempool(tx) {
+        if (!tx.verifyHMAC()) {
+            throw new Error('Invalid transaction HMAC');
+        }
+        
         const stmt = db.prepare(`
-            INSERT OR IGNORE INTO mempool (tx_hash, from_addr, to_addr, amount, timestamp, signature)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO mempool (
+                tx_hash, from_addr, to_addr, amount, timestamp, 
+                signature, salt, hmac
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `);
-        stmt.run(tx.hash(), tx.from, tx.to, tx.amount, tx.timestamp, tx.signature);
+        
+        stmt.run(
+            tx.hash(), 
+            tx.from, 
+            tx.to, 
+            tx.amount, 
+            tx.timestamp, 
+            tx.signature,
+            tx.salt,
+            tx.hmac
+        );
     }
 
     static getMempool(limit = config.MAX_PENDING_TRANSACTIONS) {
@@ -221,7 +442,9 @@ class BlockchainController {
             amount: row.amount,
             timestamp: row.timestamp,
             signature: row.signature,
-            tx_hash: row.tx_hash
+            tx_hash: row.tx_hash,
+            salt: row.salt,
+            hmac: row.hmac
         }));
     }
 
@@ -236,18 +459,84 @@ class BlockchainController {
         if (!latest || latest.height < config.DIFFICULTY_ADJUSTMENT_INTERVAL) {
             return config.INITIAL_DIFFICULTY;
         }
-        const prevBlock = BlockchainController.getBlockByHeight(latest.height - config.DIFFICULTY_ADJUSTMENT_INTERVAL);
-        const timeDiff = latest.timestamp - prevBlock.timestamp; // ms
+        
+        const prevBlock = BlockchainController.getBlockByHeight(
+            latest.height - config.DIFFICULTY_ADJUSTMENT_INTERVAL
+        );
+        
+        const timeDiff = latest.timestamp - prevBlock.timestamp;
         const expectedTime = config.BLOCK_TIME_TARGET * config.DIFFICULTY_ADJUSTMENT_INTERVAL;
+        
         let newDifficulty = config.INITIAL_DIFFICULTY;
         
         if (timeDiff < expectedTime * 0.5) {
-            newDifficulty = config.INITIAL_DIFFICULTY + 1;
+            newDifficulty = Math.min(10, config.INITIAL_DIFFICULTY + 1);
         } else if (timeDiff > expectedTime * 1.5) {
             newDifficulty = Math.max(1, config.INITIAL_DIFFICULTY - 1);
         }
+        
         return newDifficulty;
+    }
+
+    static generateMinerAPIKey(userId) {
+        return hmacManager.generateAPIKey(userId);
+    }
+
+    static verifyMinerAPIKey(apiKey, signature, salt) {
+        try {
+            const data = JSON.parse(Buffer.from(apiKey, 'base64').toString());
+            
+            if (Date.now() - data.created > config.API_KEY_EXPIRY) {
+                return false;
+            }
+            
+            return hmacManager.verify(data, signature, salt);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    static validatePoW(block, difficulty) {
+        const target = '0'.repeat(difficulty);
+        return block.hash.startsWith(target);
+    }
+
+    static getNetworkHashrate() {
+        const blocks = BlockchainController.getAllBlocks(100);
+        if (blocks.length < 2) return 0;
+        
+        const latestBlock = blocks[blocks.length - 1];
+        const oldestBlock = blocks[0];
+        const timeSpan = (latestBlock.timestamp - oldestBlock.timestamp) / 1000; // seconds
+        const totalHashes = blocks.reduce((sum, block) => sum + block.nonce, 0);
+        
+        return totalHashes / timeSpan;
     }
 }
 
-module.exports = { Transaction, Block, BlockchainController, ec };
+function initDatabase() {
+    try {
+        db.exec(`
+            ALTER TABLE mempool ADD COLUMN salt TEXT;
+            ALTER TABLE mempool ADD COLUMN hmac TEXT;
+            ALTER TABLE blocks ADD COLUMN block_salt TEXT;
+            ALTER TABLE blocks ADD COLUMN block_hmac TEXT;
+            ALTER TABLE blocks ADD COLUMN mining_salt TEXT;
+            ALTER TABLE blocks ADD COLUMN merkle_root TEXT;
+        `);
+        console.log('✅ Database schema updated with HMAC/Salt columns');
+    } catch (e) {
+        // Columns may already exist
+        console.log('ℹ️ Database schema already up to date');
+    }
+}
+
+initDatabase();
+
+module.exports = { 
+    Transaction, 
+    Block, 
+    BlockchainController, 
+    ec,
+    hmacManager 
+};
