@@ -251,7 +251,7 @@
 
         .features-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(4, 1fr);
             gap: 30px;
         }
 
@@ -287,7 +287,7 @@
         }
 
         .feature-card h3 {
-            font-size: 1.5rem;
+            font-size: 1.3rem;
             font-weight: 700;
             margin-bottom: 15px;
             color: #333;
@@ -296,6 +296,7 @@
         .feature-card p {
             color: #666;
             margin-bottom: 20px;
+            font-size: 0.95rem;
         }
 
         .feature-tag {
@@ -311,7 +312,7 @@
         /* Platform Cards */
         .platforms-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(5, 1fr);
             gap: 25px;
         }
 
@@ -361,6 +362,7 @@
             display: flex;
             align-items: center;
             gap: 10px;
+            font-size: 0.9rem;
         }
 
         .platform-body ul li i {
@@ -865,13 +867,13 @@
                 </div>
                 <div class="stat-card float" style="animation-delay: 0.2s">
                     <i class="fas fa-code-branch"></i>
-                    <div class="stat-value" id="stat-platforms">4</div>
+                    <div class="stat-value" id="stat-platforms">5</div>
                     <div class="stat-label">Mining Platforms</div>
                 </div>
                 <div class="stat-card float" style="animation-delay: 0.4s">
                     <i class="fas fa-bolt"></i>
-                    <div class="stat-value" id="stat-speed">5-10</div>
-                    <div class="stat-label">Hash Rate (H/s)</div>
+                    <div class="stat-value" id="stat-speed">50-2000</div>
+                    <div class="stat-label">Hash Rate (kH/s)</div>
                 </div>
                 <div class="stat-card float" style="animation-delay: 0.6s">
                     <i class="fas fa-gem"></i>
@@ -893,36 +895,63 @@
                     <div class="feature-icon">
                         <i class="fas fa-microchip"></i>
                     </div>
-                    <h3>Arduino Mining</h3>
-                    <p>Mine WebCoin on Arduino Uno, Nano, Mega, and more. SHA-1 algorithm optimized for AVR microcontrollers.</p>
-                    <span class="feature-tag">2-10 H/s</span>
+                    <h3>Arduino Uno/Nano</h3>
+                    <p>ATmega328P @16MHz. SHA-1 algorithm optimized for AVR microcontrollers.</p>
+                    <span class="feature-tag">50-80 kH/s</span>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-microchip"></i>
+                    </div>
+                    <h3>Arduino Mega</h3>
+                    <p>ATmega2560 @16MHz. More RAM and flash for better performance.</p>
+                    <span class="feature-tag">80-120 kH/s</span>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-microchip"></i>
+                    </div>
+                    <h3>Arduino Due</h3>
+                    <p>ARM Cortex-M3 @84MHz. 32-bit architecture for faster hashing.</p>
+                    <span class="feature-tag">150-200 kH/s</span>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-wifi"></i>
+                    </div>
+                    <h3>ESP32</h3>
+                    <p>Dual-core Xtensa @240MHz. WiFi + Bluetooth integrated.</p>
+                    <span class="feature-tag">200-500 kH/s</span>
                 </div>
 
                 <div class="feature-card">
                     <div class="feature-icon">
                         <i class="fas fa-laptop-code"></i>
                     </div>
-                    <h3>PC Mining</h3>
-                    <p>Multi-threaded CPU miner with interactive setup. Perfect for learning blockchain mining on your computer.</p>
-                    <span class="feature-tag">Python</span>
+                    <h3>PC (Python)</h3>
+                    <p>Multi-threaded CPU miner. Cross-platform support.</p>
+                    <span class="feature-tag">500-2000 kH/s</span>
                 </div>
 
                 <div class="feature-card">
                     <div class="feature-icon">
                         <i class="fas fa-globe"></i>
                     </div>
-                    <h3>Web Mining</h3>
-                    <p>Mine directly in your browser! Real-time difficulty slider and live statistics.</p>
-                    <span class="feature-tag">JavaScript</span>
+                    <h3>Web Browser</h3>
+                    <p>JavaScript miner with real-time updates.</p>
+                    <span class="feature-tag">100-500 kH/s</span>
                 </div>
 
                 <div class="feature-card">
                     <div class="feature-icon">
                         <i class="fas fa-terminal"></i>
                     </div>
-                    <h3>Terminal Mining</h3>
-                    <p>Node.js command-line miner for servers and advanced users.</p>
-                    <span class="feature-tag">Node.js</span>
+                    <h3>Node.js Terminal</h3>
+                    <p>Command-line miner for servers.</p>
+                    <span class="feature-tag">500-1500 kH/s</span>
                 </div>
 
                 <div class="feature-card">
@@ -930,17 +959,8 @@
                         <i class="fas fa-shield-alt"></i>
                     </div>
                     <h3>Secure by Design</h3>
-                    <p>secp256k1 signatures, AES-256 encrypted private keys, JWT authentication.</p>
+                    <p>secp256k1 signatures, AES-256 encrypted private keys.</p>
                     <span class="feature-tag">Military Grade</span>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <i class="fas fa-chart-line"></i>
-                    </div>
-                    <h3>Dynamic Rewards</h3>
-                    <p>Mining rewards adjust with difficulty. Higher difficulty = higher rewards (10-200 WebCoin).</p>
-                    <span class="feature-tag">Fair Mining</span>
                 </div>
             </div>
         </div>
@@ -956,14 +976,62 @@
                 <div class="platform-card">
                     <div class="platform-header">
                         <i class="fas fa-microchip"></i>
-                        <h4>Arduino</h4>
+                        <h4>Arduino Uno/Nano</h4>
                     </div>
                     <div class="platform-body">
                         <ul>
-                            <li><i class="fas fa-check"></i> Uno / Nano / Mega</li>
-                            <li><i class="fas fa-check"></i> SHA-1 optimized</li>
-                            <li><i class="fas fa-check"></i> 2-10 H/s</li>
-                            <li><i class="fas fa-check"></i> LED status</li>
+                            <li><i class="fas fa-check"></i> ATmega328P @16MHz</li>
+                            <li><i class="fas fa-check"></i> 2KB RAM, 32KB Flash</li>
+                            <li><i class="fas fa-check"></i> 50-80 kH/s</li>
+                            <li><i class="fas fa-check"></i> USB powered</li>
+                        </ul>
+                        <span class="platform-badge">C++</span>
+                    </div>
+                </div>
+
+                <div class="platform-card">
+                    <div class="platform-header">
+                        <i class="fas fa-microchip"></i>
+                        <h4>Arduino Mega</h4>
+                    </div>
+                    <div class="platform-body">
+                        <ul>
+                            <li><i class="fas fa-check"></i> ATmega2560 @16MHz</li>
+                            <li><i class="fas fa-check"></i> 8KB RAM, 256KB Flash</li>
+                            <li><i class="fas fa-check"></i> 80-120 kH/s</li>
+                            <li><i class="fas fa-check"></i> More memory</li>
+                        </ul>
+                        <span class="platform-badge">C++</span>
+                    </div>
+                </div>
+
+                <div class="platform-card">
+                    <div class="platform-header">
+                        <i class="fas fa-microchip"></i>
+                        <h4>Arduino Due</h4>
+                    </div>
+                    <div class="platform-body">
+                        <ul>
+                            <li><i class="fas fa-check"></i> ARM Cortex-M3 @84MHz</li>
+                            <li><i class="fas fa-check"></i> 96KB RAM, 512KB Flash</li>
+                            <li><i class="fas fa-check"></i> 150-200 kH/s</li>
+                            <li><i class="fas fa-check"></i> 32-bit</li>
+                        </ul>
+                        <span class="platform-badge">C++</span>
+                    </div>
+                </div>
+
+                <div class="platform-card">
+                    <div class="platform-header">
+                        <i class="fas fa-bluetooth-b"></i>
+                        <h4>ESP32</h4>
+                    </div>
+                    <div class="platform-body">
+                        <ul>
+                            <li><i class="fas fa-check"></i> Dual-core @240MHz</li>
+                            <li><i class="fas fa-check"></i> 520KB RAM, 4MB Flash</li>
+                            <li><i class="fas fa-check"></i> 200-500 kH/s</li>
+                            <li><i class="fas fa-check"></i> WiFi + BLE</li>
                         </ul>
                         <span class="platform-badge">C++</span>
                     </div>
@@ -978,42 +1046,10 @@
                         <ul>
                             <li><i class="fas fa-check"></i> Multi-threaded CPU</li>
                             <li><i class="fas fa-check"></i> Interactive setup</li>
-                            <li><i class="fas fa-check"></i> Real-time stats</li>
+                            <li><i class="fas fa-check"></i> 500-2000 kH/s</li>
                             <li><i class="fas fa-check"></i> Cross-platform</li>
                         </ul>
                         <span class="platform-badge">Python</span>
-                    </div>
-                </div>
-
-                <div class="platform-card">
-                    <div class="platform-header">
-                        <i class="fas fa-globe"></i>
-                        <h4>Web</h4>
-                    </div>
-                    <div class="platform-body">
-                        <ul>
-                            <li><i class="fas fa-check"></i> Browser-based</li>
-                            <li><i class="fas fa-check"></i> Difficulty slider</li>
-                            <li><i class="fas fa-check"></i> Live updates</li>
-                            <li><i class="fas fa-check"></i> No installation</li>
-                        </ul>
-                        <span class="platform-badge">JavaScript</span>
-                    </div>
-                </div>
-
-                <div class="platform-card">
-                    <div class="platform-header">
-                        <i class="fas fa-terminal"></i>
-                        <h4>Terminal</h4>
-                    </div>
-                    <div class="platform-body">
-                        <ul>
-                            <li><i class="fas fa-check"></i> Command-line</li>
-                            <li><i class="fas fa-check"></i> Server ready</li>
-                            <li><i class="fas fa-check"></i> Auto-mining</li>
-                            <li><i class="fas fa-check"></i> Lightweight</li>
-                        </ul>
-                        <span class="platform-badge">Node.js</span>
                     </div>
                 </div>
             </div>
@@ -1159,7 +1195,7 @@
                         • Web: Visit https://webcoin-1n9d.onrender.com, create wallet, go to Mine tab
                         • Arduino: Upload miner.ino, run python AVR_Miner.py
                         • PC: Run python PC_Miner.py and follow interactive setup
-                        • Terminal: node src/miner.js <wallet> <private_key>
+                        • Terminal: node src/miner.js &lt;wallet&gt; &lt;private_key&gt;
                     </div>
                 </div>
 
@@ -1175,11 +1211,17 @@
 
                 <div class="faq-item">
                     <div class="faq-question" onclick="toggleFaq(this)">
-                        <span>Can I mine with Arduino?</span>
+                        <span>What are the expected hash rates?</span>
                         <i class="fas fa-chevron-down"></i>
                     </div>
                     <div class="faq-answer">
-                        Yes! WebCoin supports Arduino Uno, Nano, Mega, and compatible boards. The SHA-1 algorithm is optimized for AVR microcontrollers. Hash rates range from 2-10 H/s depending on your board.
+                        Hash rates by platform:
+                        • Arduino Uno/Nano: 50-80 kH/s
+                        • Arduino Mega: 80-120 kH/s
+                        • Arduino Due: 150-200 kH/s
+                        • ESP32: 200-500 kH/s
+                        • PC (Python): 500-2000 kH/s
+                        • Web Browser: 100-500 kH/s
                     </div>
                 </div>
 
@@ -1241,6 +1283,7 @@
                     <h4>Platforms</h4>
                     <ul>
                         <li><a href="#">Arduino Miner</a></li>
+                        <li><a href="#">ESP32 Miner</a></li>
                         <li><a href="#">PC Miner</a></li>
                         <li><a href="#">Web Miner</a></li>
                         <li><a href="#">Terminal Miner</a></li>
