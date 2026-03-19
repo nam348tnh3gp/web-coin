@@ -1,4 +1,4 @@
-const crypto = require('crypto')
+const crypto = require('crypto');
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
@@ -85,7 +85,7 @@ app.get('/api/info', (req, res) => {
             minReward: config.MIN_REWARD,
             maxReward: config.MAX_REWARD,
             blockTimeTarget: config.BLOCK_TIME_TARGET,
-            networkHashrate: Math.round(networkHashrate / 1000) // kH/s
+            networkHashrate: Math.round(networkHashrate / 1000)
         });
     } catch (err) {
         logger.error(err);
@@ -304,7 +304,7 @@ app.post('/api/blocks/submit', authenticateToken, validate(blockSchema), (req, r
     try {
         const { 
             height, transactions, previousHash, timestamp, nonce, 
-            hash, minerAddress, blockHMAC, workerSalt, miningSalt 
+            hash, minerAddress, blockHMAC, workerSalt, miningSalt, blockSalt
         } = req.body;
 
         const minerPub = parseDisplayAddress(minerAddress);
@@ -327,14 +327,23 @@ app.post('/api/blocks/submit', authenticateToken, validate(blockSchema), (req, r
         const txObjects = transactions.map(t => Transaction.fromJSON(t));
         const block = new Block(height, txObjects, previousHash, timestamp, nonce);
         
-        // Set mining salt nếu có
         if (miningSalt) block.miningSalt = miningSalt;
+        if (blockSalt) block.blockSalt = blockSalt;
         
         if (block.calculateHash() !== hash) {
+            console.log('=== DEBUG HASH SERVER ===');
+            console.log('Height:', height);
+            console.log('PreviousHash:', previousHash);
+            console.log('Timestamp:', timestamp);
+            console.log('Nonce:', nonce);
+            console.log('MiningSalt:', miningSalt);
+            console.log('BlockSalt:', blockSalt);
+            console.log('Client hash:', hash);
+            console.log('Server hash:', block.calculateHash());
+            console.log('========================');
             return res.status(400).json({ error: 'Hash calculation mismatch' });
         }
 
-        // Xác thực HMAC block
         if (blockHMAC && workerSalt) {
             const blockData = {
                 height,
@@ -368,7 +377,6 @@ app.post('/api/blocks/submit', authenticateToken, validate(blockSchema), (req, r
             return res.status(400).json({ error: 'Coinbase recipient mismatch' });
         }
 
-        // Verify all transactions in block
         for (let i = 1; i < txObjects.length; i++) {
             if (!txObjects[i].isValid()) {
                 return res.status(400).json({ error: `Invalid transaction at index ${i}` });
@@ -446,7 +454,6 @@ app.get('/api/stats', (req, res) => {
         const difficulty = BlockchainController.adjustDifficulty();
         const networkHashrate = BlockchainController.getNetworkHashrate();
         
-        // Calculate average block time
         let avgBlockTime = 0;
         if (blocks.length > 1) {
             const firstBlock = blocks[0];
@@ -460,7 +467,7 @@ app.get('/api/stats', (req, res) => {
             totalTransactions,
             totalWallets,
             currentDifficulty: difficulty,
-            networkHashrate: Math.round(networkHashrate / 1000), // kH/s
+            networkHashrate: Math.round(networkHashrate / 1000),
             averageBlockTime: Math.round(avgBlockTime),
             lastBlock: blocks[blocks.length - 1]?.toJSON()
         });
