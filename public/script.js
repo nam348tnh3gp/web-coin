@@ -13,6 +13,7 @@ let transactionHistory = [];
 let historyFilter = 'all';
 let networkDifficulty = 3;
 let miningDifficulty = 3;
+let hmacSecret = null;
 
 function generateSalt(length = 16) {
     const array = new Uint8Array(length);
@@ -77,6 +78,23 @@ function adjustMiningDifficulty() {
             }
         }
     }
+}
+
+async function getHMACSecret() {
+    try {
+        const res = await fetch('/api/hmac-secret', {
+            credentials: 'include'
+        });
+        if (res.ok) {
+            const data = await res.json();
+            hmacSecret = data.secret;
+            console.log('✅ Đã lấy HMAC secret từ server');
+            return true;
+        }
+    } catch (err) {
+        console.error('Lỗi lấy HMAC secret:', err);
+    }
+    return false;
 }
 
 async function registerWallet() {
@@ -192,6 +210,8 @@ async function loginWallet() {
 
             currentWallet.privateKey = privateKeyHex;
 
+            await getHMACSecret();
+
             document.getElementById('wallet-info').style.display = 'block';
             document.getElementById('wallet-display-address').innerText = currentWallet.displayAddress;
 
@@ -218,6 +238,7 @@ async function logoutWallet() {
     
     await fetch('/api/logout', { method: 'POST', credentials: 'include' });
     currentWallet = { publicKey: null, displayAddress: null, privateKey: null };
+    hmacSecret = null;
     document.getElementById('wallet-info').style.display = 'none';
     document.getElementById('login-result').innerHTML = '';
     document.getElementById('send-info').innerHTML = 'Vui lòng đăng nhập trước.';
@@ -459,6 +480,11 @@ async function startMining() {
         return;
     }
 
+    if (!hmacSecret) {
+        showError('mining-log', 'Chưa lấy được HMAC secret từ server');
+        return;
+    }
+
     if (isMining) {
         stopMining();
         document.getElementById('mining-log').innerHTML += '\n⏸️ Đã tạm dừng đào.\n';
@@ -608,12 +634,21 @@ async function startMining() {
             logDiv.innerHTML += `⏱️ Thời gian: ${totalTime}s\n`;
 
             const workerSalt = generateSalt(16);
-            const blockHMAC = await generateHMAC({
+            const blockData = {
                 height: newBlock.height,
                 hash: hash,
                 previousHash: newBlock.previousHash,
                 nonce: newBlock.nonce
-            }, currentWallet.privateKey, workerSalt);
+            };
+            
+            console.log('=== DEBUG HMAC CLIENT ===');
+            console.log('Block Data:', blockData);
+            console.log('Worker Salt:', workerSalt);
+            
+            const blockHMAC = await generateHMAC(blockData, hmacSecret, workerSalt);
+            
+            console.log('Block HMAC:', blockHMAC);
+            console.log('========================');
 
             logDiv.innerHTML += `🔐 Block HMAC: ${blockHMAC.substring(0, 16)}...\n`;
 
@@ -670,6 +705,11 @@ async function startMining() {
 async function startSimpleMining() {
     if (!currentWallet.displayAddress) {
         showError('mining-log', 'Vui lòng đăng nhập trước');
+        return;
+    }
+
+    if (!hmacSecret) {
+        showError('mining-log', 'Chưa lấy được HMAC secret từ server');
         return;
     }
 
@@ -771,12 +811,13 @@ async function startSimpleMining() {
         logDiv.innerHTML += `⏱️ Thời gian: ${totalTime}s\n`;
 
         const workerSalt = generateSalt(16);
-        const blockHMAC = await generateHMAC({
+        const blockData = {
             height: newBlock.height,
             hash: hash,
             previousHash: newBlock.previousHash,
             nonce: newBlock.nonce
-        }, currentWallet.privateKey, workerSalt);
+        };
+        const blockHMAC = await generateHMAC(blockData, hmacSecret, workerSalt);
 
         const submitData = {
             height: newBlock.height,
