@@ -64,6 +64,10 @@ function parseDisplayAddress(displayAddr) {
     return displayAddr;
 }
 
+function getBlockDataString(height, hash, previousHash, nonce) {
+    return `${height}:${hash}:${previousHash}:${nonce}`;
+}
+
 app.get('/api/info', (req, res) => {
     try {
         const latest = BlockchainController.getLatestBlock();
@@ -336,18 +340,18 @@ app.post('/api/blocks/submit', authenticateToken, validate(blockSchema), (req, r
         }
 
         if (blockHMAC && workerSalt) {
-            const blockDataString = `${height}:${hash}:${previousHash}:${nonce}`;
-            
+            const blockDataString = getBlockDataString(height, hash, previousHash, nonce);
+
             console.log('=== DEBUG HMAC SERVER ===');
             console.log('Block Data String:', blockDataString);
             console.log('Worker Salt:', workerSalt);
             console.log('Client HMAC:', blockHMAC);
-            
+
             if (!hmacManager.verify(blockDataString, blockHMAC, workerSalt)) {
                 console.log('❌ HMAC verification failed');
                 return res.status(400).json({ error: 'Invalid block HMAC signature' });
             }
-            
+
             console.log('✅ HMAC verification passed');
             console.log('========================');
             block.blockHMAC = blockHMAC;
