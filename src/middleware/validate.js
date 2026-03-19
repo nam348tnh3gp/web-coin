@@ -9,7 +9,7 @@ const loginSchema = Joi.object({
     password: Joi.string().required()
 });
 
-// Schema cho transaction - THÊM salt và hmac
+// Schema cho transaction
 const transactionSchema = Joi.object({
     from: Joi.string().required(),
     to: Joi.string().required(),
@@ -20,7 +20,7 @@ const transactionSchema = Joi.object({
     hmac: Joi.string().optional()
 });
 
-// Schema cho block - THÊM blockHMAC, workerSalt, miningSalt
+// Schema cho block - ĐÃ THÊM blockSalt
 const blockSchema = Joi.object({
     height: Joi.number().integer().required(),
     transactions: Joi.array().required(),
@@ -31,7 +31,8 @@ const blockSchema = Joi.object({
     minerAddress: Joi.string().pattern(/^W_/).required(),
     blockHMAC: Joi.string().optional(),
     workerSalt: Joi.string().optional(),
-    miningSalt: Joi.string().optional()
+    miningSalt: Joi.string().optional(),
+    blockSalt: Joi.string().optional()  // THÊM dòng này
 });
 
 function validate(schema) {
@@ -44,4 +45,10 @@ function validate(schema) {
     };
 }
 
-module.exports = { validate, registerSchema, loginSchema, transactionSchema, blockSchema };
+module.exports = { 
+    validate, 
+    registerSchema, 
+    loginSchema, 
+    transactionSchema, 
+    blockSchema 
+};
