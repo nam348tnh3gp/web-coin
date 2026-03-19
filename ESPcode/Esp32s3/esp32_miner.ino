@@ -5,7 +5,6 @@
 #include <Preferences.h>
 #include "DSHA1.h"
 #include <time.h>
-#include <mbedtls/md.h>
 
 #define ARDUINO_USB_MODE 1
 #define ARDUINO_USB_CDC_ON_BOOT 1
@@ -39,49 +38,9 @@ const unsigned long NETWORK_CHECK_INTERVAL = 30000;
 
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
-String bytesToHex(uint8_t* bytes, size_t len) {
-    String hex = "";
-    for (size_t i = 0; i < len; i++) {
-        if (bytes[i] < 0x10) hex += "0";
-        hex += String(bytes[i], HEX);
-    }
-    hex.toLowerCase();
-    return hex;
-}
-
-String generateSalt(size_t length) {
-    uint8_t* buffer = (uint8_t*)malloc(length);
-    if (!buffer) return "";
-    for (size_t i = 0; i < length; i++) {
-        buffer[i] = esp_random() & 0xFF;
-    }
-    String salt = bytesToHex(buffer, length);
-    free(buffer);
-    return salt;
-}
-
-String calculateHMAC(const String& data, const String& key, const String& salt) {
-    String hmacInput = key + salt;
-    uint8_t hmacResult[32];
-    
-    mbedtls_md_context_t ctx;
-    mbedtls_md_type_t md_type = MBEDTLS_MD_SHA256;
-    
-    mbedtls_md_init(&ctx);
-    mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(md_type), 1);
-    mbedtls_md_hmac_starts(&ctx, (const uint8_t*)hmacInput.c_str(), hmacInput.length());
-    mbedtls_md_hmac_update(&ctx, (const uint8_t*)data.c_str(), data.length());
-    mbedtls_md_hmac_finish(&ctx, hmacResult);
-    mbedtls_md_free(&ctx);
-    
-    return bytesToHex(hmacResult, 32);
-}
-
-String calculateBlockHash(int height, String prevHash, unsigned long timestamp, 
-                         JsonArray transactions, unsigned long nonce,
-                         const String& miningSalt, const String& blockSalt) {
-    static char txBuffer[2048];
-    static char dataBuffer[2048];
+String calculateBlockHash(int height, String prevHash, unsigned long timestamp, JsonArray transactions, unsigned long nonce) {
+    static char txBuffer[1024];
+    static char dataBuffer[1024];
     
     txBuffer[0] = '\0';
     for (JsonVariant v : transactions) {
@@ -90,9 +49,8 @@ String calculateBlockHash(int height, String prevHash, unsigned long timestamp,
         strcat(txBuffer, tmp.c_str());
     }
     
-    snprintf(dataBuffer, sizeof(dataBuffer), "%d%s%lu%s%lu%s%s",
-             height, prevHash.c_str(), timestamp, txBuffer, nonce,
-             miningSalt.c_str(), blockSalt.c_str());
+    snprintf(dataBuffer, sizeof(dataBuffer), "%d%s%lu%s%lu",
+             height, prevHash.c_str(), timestamp, txBuffer, nonce);
     
     DSHA1 sha1;
     sha1.write((const unsigned char*)dataBuffer, strlen(dataBuffer));
@@ -100,7 +58,13 @@ String calculateBlockHash(int height, String prevHash, unsigned long timestamp,
     unsigned char hashResult[20];
     sha1.finalize(hashResult);
     
-    return bytesToHex(hashResult, 20);
+    String hash = "";
+    for (int i = 0; i < 20; i++) {
+        if (hashResult[i] < 0x10) hash += "0";
+        hash += String(hashResult[i], HEX);
+    }
+    hash.toLowerCase();
+    return hash;
 }
 
 bool login() {
@@ -180,6 +144,10 @@ bool login() {
         }
     } else {
         Serial.println("Khong the ket noi den server!");
+        Serial.println("Kiem tra:");
+        Serial.println("1. Duong dan server: " + String(SERVER_URL));
+        Serial.println("2. ESP32 co internet khong?");
+        Serial.println("3. Server dang hoat dong khong?");
         http.end();
         delete client;
         return false;
@@ -225,7 +193,7 @@ bool getPending(DynamicJsonDocument &doc) {
     if (code == 200) {
         String res = http.getString();
         http.end();
-        if (!deserializeJson(doc, res)) {
+        if (!deserializeJson(doc, res) && doc.size() > 0) {
             success = true;
         }
     }
@@ -234,10 +202,7 @@ bool getPending(DynamicJsonDocument &doc) {
     return success;
 }
 
-bool submitBlock(int height, unsigned long nonce, String hash, String prevHash, 
-                int reward, JsonArray transactions, const String& blockHMAC,
-                const String& workerSalt, const String& miningSalt, 
-                const String& blockSalt) {
+bool submitBlock(int height, unsigned long nonce, String hash, String prevHash, int reward, JsonArray transactions) {
     WiFiClientSecure *client = new WiFiClientSecure;
     if(!client) return false;
     
@@ -254,10 +219,6 @@ bool submitBlock(int height, unsigned long nonce, String hash, String prevHash,
     doc["nonce"] = nonce;
     doc["hash"] = hash;
     doc["minerAddress"] = walletAddress;
-    doc["blockHMAC"] = blockHMAC;
-    doc["workerSalt"] = workerSalt;
-    doc["miningSalt"] = miningSalt;
-    doc["blockSalt"] = blockSalt;
 
     JsonArray txs = doc.createNestedArray("transactions");
     for (JsonVariant v : transactions) txs.add(v);
@@ -297,6 +258,7 @@ bool checkWiFi() {
 
 void miningTask(void* p) {
     int id = (int)(intptr_t)p;
+    char targetStr[32];
     
     while (running) {
         if (!checkWiFi()) {
@@ -306,6 +268,7 @@ void miningTask(void* p) {
         
         DynamicJsonDocument info(4096);
         if (!getNetwork(info)) {
+            Serial.printf("[Task %d] Khong lay duoc thong tin mang\n", id);
             delay(2000);
             continue;
         }
@@ -315,7 +278,6 @@ void miningTask(void* p) {
         int diff = difficultyOverride > 0 ? difficultyOverride : info["difficulty"].as<int>();
         int reward = info["reward"].as<int>();
         
-        char targetStr[32];
         for (int i = 0; i < diff; i++) targetStr[i] = '0';
         targetStr[diff] = '\0';
         
@@ -324,65 +286,47 @@ void miningTask(void* p) {
         
         DynamicJsonDocument pendingDoc(8192);
         JsonArray pending;
-        if (getPending(pendingDoc)) {
-            pending = pendingDoc.as<JsonArray>();
-        }
+        if (getPending(pendingDoc)) pending = pendingDoc.as<JsonArray>();
         
         DynamicJsonDocument txDoc(8192);
         JsonArray txs = txDoc.to<JsonArray>();
         
         unsigned long timestamp = time(nullptr) * 1000;
         
-        String txSalt = generateSalt(16);
         JsonObject coinbase = txs.createNestedObject();
         coinbase["from"] = nullptr;
         coinbase["to"] = walletPublicKey;
         coinbase["amount"] = reward;
         coinbase["timestamp"] = timestamp;
         coinbase["signature"] = nullptr;
-        coinbase["salt"] = txSalt;
         
-        String txData = walletPublicKey + String(reward) + String(timestamp) + txSalt;
-        String txHMAC = calculateHMAC(txData, walletPublicKey, txSalt);
-        coinbase["hmac"] = txHMAC;
-        
-        for (JsonObject t : pending) {
-            txs.add(t);
-        }
-        
-        String miningSalt = generateSalt(8);
-        String blockSalt = generateSalt(8);
+        for (JsonObject t : pending) txs.add(t);
         
         if (id == 0) {
             Serial.printf("\n[BLOCK %d] TX: %d | Do kho: %d | Thuong: %d\n", 
-                         height, txs.size(), diff, reward);
-            Serial.printf("Mining Salt: %s\n", miningSalt.c_str());
-            Serial.printf("Block Salt: %s\n", blockSalt.c_str());
+                         height, (int)txs.size(), diff, reward);
         }
         
         unsigned long nonce = id * 10000000UL;
         unsigned long localHashCount = 0;
-        unsigned long start = millis();
+        unsigned long lastTimestampUpdate = timestamp;
         
         while (running) {
-            String hash = calculateBlockHash(height, prevHash, timestamp, txs, nonce, miningSalt, blockSalt);
-            localHashCount++;
+            if (nonce % 50000 == 0) {
+                unsigned long newTimestamp = time(nullptr) * 1000;
+                if (newTimestamp > lastTimestampUpdate + 500) {
+                    timestamp = newTimestamp;
+                    lastTimestampUpdate = timestamp;
+                    if (txs.size() > 0) txs[0]["timestamp"] = timestamp;
+                }
+            }
+            
+            String hash = calculateBlockHash(height, prevHash, timestamp, txs, nonce);
             
             if (strncmp(hash.c_str(), targetStr, diff) == 0) {
-                unsigned long elapsed = (millis() - start) / 1000;
-                float hashrate = localHashCount / (elapsed > 0 ? elapsed : 1);
-                
                 Serial.printf("\n[FOUND] Task %d | Nonce: %lu | Hash: %s\n", id, nonce, hash.c_str());
-                Serial.printf("Hashrate: %.2f H/s\n", hashrate);
                 
-                String workerSalt = generateSalt(16);
-                String blockData = String(height) + hash + prevHash + String(nonce);
-                String blockHMAC = calculateHMAC(blockData, walletPublicKey, workerSalt);
-                
-                Serial.printf("Block HMAC: %s\n", blockHMAC.c_str());
-                
-                if (submitBlock(height, nonce, hash, prevHash, reward, txs, 
-                               blockHMAC, workerSalt, miningSalt, blockSalt)) {
+                if (submitBlock(height, nonce, hash, prevHash, reward, txs)) {
                     portENTER_CRITICAL(&mux);
                     blocksMined++;
                     totalReward += reward;
@@ -430,8 +374,7 @@ void setup() {
     Serial.begin(115200);
     delay(1000);
     
-    Serial.println("\n\nWebCoin Miner cho ESP32-S3 v2.0");
-    Serial.println("(SHA1 + HMAC + Salt)");
+    Serial.println("\n\nWebCoin Miner cho ESP32-S3");
     Serial.println("=================================");
     
     pinMode(LED_BUILTIN, OUTPUT);
