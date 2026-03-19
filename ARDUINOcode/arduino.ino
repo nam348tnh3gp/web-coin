@@ -6,7 +6,7 @@
 #define LED_PIN LED_BUILTIN
 #define BAUD_RATE 115200
 #define EEPROM_CONFIG_ADDR 0
-#define CONFIG_VERSION 0x01
+#define CONFIG_VERSION 0x02
 
 struct Config {
     uint8_t version;
@@ -23,6 +23,85 @@ unsigned long totalHashes = 0;
 unsigned long totalBlocks = 0;
 unsigned long startTime = 0;
 bool mining = true;
+
+String bytesToHex(uint8_t* bytes, size_t len) {
+    String hex = "";
+    for (size_t i = 0; i < len; i++) {
+        if (bytes[i] < 0x10) hex += "0";
+        hex += String(bytes[i], HEX);
+    }
+    hex.toLowerCase();
+    return hex;
+}
+
+uint8_t randomByte() {
+    return (uint8_t)((analogRead(A0) + micros()) & 0xFF);
+}
+
+String generateSalt(uint8_t length) {
+    uint8_t* buffer = (uint8_t*)malloc(length);
+    if (!buffer) return "";
+    for (uint8_t i = 0; i < length; i++) {
+        buffer[i] = randomByte();
+    }
+    String salt = bytesToHex(buffer, length);
+    free(buffer);
+    return salt;
+}
+
+String calculateHMAC(const String& data, const String& key, const String& salt) {
+    String hmacInput = key + salt;
+    
+    DSHA1 sha1;
+    sha1.write((const unsigned char*)hmacInput.c_str(), hmacInput.length());
+    unsigned char keyHash[20];
+    sha1.finalize(keyHash);
+    
+    String innerPad = "";
+    String outerPad = "";
+    for (int i = 0; i < 20; i++) {
+        innerPad += (char)(keyHash[i] ^ 0x36);
+        outerPad += (char)(keyHash[i] ^ 0x5C);
+    }
+    
+    DSHA1 innerSha1;
+    innerSha1.write((const unsigned char*)innerPad.c_str(), 20);
+    innerSha1.write((const unsigned char*)data.c_str(), data.length());
+    unsigned char innerHash[20];
+    innerSha1.finalize(innerHash);
+    
+    DSHA1 outerSha1;
+    outerSha1.write((const unsigned char*)outerPad.c_str(), 20);
+    outerSha1.write(innerHash, 20);
+    unsigned char hmacResult[20];
+    outerSha1.finalize(hmacResult);
+    
+    return bytesToHex(hmacResult, 20);
+}
+
+String calculateBlockHash(int height, String prevHash, unsigned long timestamp, 
+                         const String& txString, unsigned long nonce,
+                         const String& miningSalt, const String& blockSalt) {
+    char dataToHash[256];
+    snprintf(dataToHash, sizeof(dataToHash), "%d%s%lu%s%lu%s%s",
+             height, prevHash.c_str(), timestamp, txString.c_str(), nonce,
+             miningSalt.c_str(), blockSalt.c_str());
+
+    DSHA1 sha1;
+    sha1.write((const unsigned char*)dataToHash, strlen(dataToHash));
+
+    unsigned char hashResult[20];
+    sha1.finalize(hashResult);
+
+    return bytesToHex(hashResult, 20);
+}
+
+bool checkHashTarget(const String& hash, uint8_t difficulty) {
+    for (uint8_t i = 0; i < difficulty; i++) {
+        if (hash.charAt(i) != '0') return false;
+    }
+    return true;
+}
 
 void loadConfig() {
     EEPROM.get(EEPROM_CONFIG_ADDR, config);
@@ -71,41 +150,14 @@ void blinkLED(int count, int delayMs) {
     }
 }
 
-String bytesToHex(uint8_t* bytes, size_t len) {
-    String hex = "";
-    for (size_t i = 0; i < len; i++) {
-        if (bytes[i] < 0x10) hex += "0";
-        hex += String(bytes[i], HEX);
-    }
-    return hex;
-}
-
-bool checkHashTarget(uint8_t* hash, uint8_t difficulty) {
-    uint8_t leadingZeros = 0;
-    for (int i = 0; i < 20; i++) {
-        uint8_t byte = hash[i];
-        
-        if ((byte >> 4) == 0) {
-            leadingZeros++;
-            if ((byte & 0x0F) == 0) {
-                leadingZeros++;
-            } else {
-                break;
-            }
-        } else {
-            break;
-        }
-    }
-    
-    return leadingZeros >= difficulty;
-}
-
 void processJob(String jobData) {
     int comma1 = jobData.indexOf(',');
     int comma2 = jobData.indexOf(',', comma1 + 1);
     int comma3 = jobData.indexOf(',', comma2 + 1);
     int comma4 = jobData.indexOf(',', comma3 + 1);
     int comma5 = jobData.indexOf(',', comma4 + 1);
+    int comma6 = jobData.indexOf(',', comma5 + 1);
+    int comma7 = jobData.indexOf(',', comma6 + 1);
     
     if (comma1 == -1 || comma2 == -1 || comma3 == -1 || comma4 == -1 || comma5 == -1) {
         Serial.println(F("ERROR,Invalid job format"));
@@ -116,39 +168,60 @@ void processJob(String jobData) {
     String prevHash = jobData.substring(comma2 + 1, comma3);
     String timestampStr = jobData.substring(comma3 + 1, comma4);
     String difficultyStr = jobData.substring(comma4 + 1, comma5);
-    String rewardStr = jobData.substring(comma5 + 1);
+    String rewardStr = jobData.substring(comma5 + 1, comma6);
     
     uint32_t height = heightStr.toInt();
     uint32_t timestamp = timestampStr.toInt();
     uint8_t difficulty = difficultyStr.toInt();
     uint32_t reward = rewardStr.toInt();
     
-    char dataToHash[128];
+    String txString = "";
+    if (comma6 != -1 && comma7 != -1) {
+        txString = jobData.substring(comma6 + 1, comma7);
+    }
+    
+    String miningSalt = "";
+    String blockSalt = "";
+    if (comma7 != -1) {
+        miningSalt = jobData.substring(comma7 + 1, jobData.indexOf(',', comma7 + 1));
+        blockSalt = jobData.substring(jobData.indexOf(',', comma7 + 1) + 1);
+    } else {
+        miningSalt = generateSalt(8);
+        blockSalt = generateSalt(8);
+    }
+    
     unsigned long nonce = 0;
     unsigned long startTime = micros();
     unsigned long hashCount = 0;
     
-    duco_hash_init(&hasher, prevHash.c_str());
-    
     while (mining) {
-        sprintf(dataToHash, "%lu%s%lu%lu", height, prevHash.c_str(), timestamp, nonce);
-        
-        uint8_t const* hashResult = duco_hash_try_nonce(&hasher, dataToHash + strlen(prevHash.c_str()));
-        
+        String hash = calculateBlockHash(height, prevHash, timestamp, txString, nonce, miningSalt, blockSalt);
         hashCount++;
         totalHashes++;
         config.totalHashes++;
         
-        if (checkHashTarget((uint8_t*)hashResult, difficulty)) {
+        if (checkHashTarget(hash, difficulty)) {
             unsigned long elapsed = micros() - startTime;
             float hashrate = (hashCount * 1000000.0) / elapsed;
+            
+            String workerSalt = generateSalt(16);
+            String blockData = String(height) + hash + prevHash + String(nonce);
+            String blockHMAC = calculateHMAC(blockData, config.wallet, workerSalt);
             
             Serial.print(F("RESULT,"));
             Serial.print(nonce);
             Serial.print(F(","));
             Serial.print(elapsed);
             Serial.print(F(","));
-            Serial.println(bytesToHex((uint8_t*)hashResult, 20));
+            Serial.print(hash);
+            Serial.print(F(","));
+            Serial.print(blockHMAC);
+            Serial.print(F(","));
+            Serial.print(workerSalt);
+            Serial.print(F(","));
+            Serial.print(miningSalt);
+            Serial.print(F(","));
+            Serial.println(blockSalt);
             
             if (difficulty >= config.difficulty) {
                 totalBlocks++;
@@ -164,11 +237,11 @@ void processJob(String jobData) {
             Serial.print(height);
             Serial.print(F(", Nonce: "));
             Serial.print(nonce);
-            Serial.print(F(", Time: "));
-            Serial.print(elapsed / 1000.0);
-            Serial.print(F("ms, Hashrate: "));
-            Serial.print(hashrate / 1000.0);
-            Serial.println(F(" kH/s"));
+            Serial.print(F(", Hash: "));
+            Serial.print(hash.substring(0, 20));
+            Serial.print(F("..., HMAC: "));
+            Serial.print(blockHMAC.substring(0, 16));
+            Serial.println(F("..."));
             
             break;
         }
@@ -188,7 +261,7 @@ void processJob(String jobData) {
             Serial.print(F(","));
             Serial.print(nonce);
             Serial.print(F(","));
-            Serial.println(bytesToHex((uint8_t*)hashResult, 8));
+            Serial.println(hash.substring(0, 8));
         }
     }
 }
@@ -261,9 +334,12 @@ void setup() {
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, LOW);
     
+    randomSeed(analogRead(A0));
+    
     loadConfig();
     
-    Serial.println(F("\nWebCoin AVR Miner v1.0"));
+    Serial.println(F("\nWebCoin AVR Miner v2.0"));
+    Serial.println(F("(SHA1 + HMAC + Salt)"));
     Serial.println();
     
     Serial.print(F("Board: "));
