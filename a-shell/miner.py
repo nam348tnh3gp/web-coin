@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-WebCoin Miner v10.0 - PENDING CHO MỖI NONCE
+WebCoin Miner v10.0 - SHA1 + HMAC + Salt
 """
 
 import os
@@ -8,6 +8,8 @@ import sys
 import time
 import json
 import hashlib
+import hmac
+import secrets
 import threading
 import multiprocessing
 from datetime import datetime
@@ -53,7 +55,18 @@ def print_color(text, color=Fore.WHITE, bright=False):
     style = Style.BRIGHT if bright else ""
     print(f"{color}{style}{text}{Style.RESET_ALL}")
 
-# ============== API ==============
+def generate_salt(length=16):
+    return secrets.token_hex(length)
+
+def calculate_hmac(data, key, salt):
+    message = json.dumps(data) if isinstance(data, (dict, list)) else str(data)
+    hmac_obj = hmac.new(
+        (key + salt).encode('utf-8'),
+        message.encode('utf-8'),
+        hashlib.sha256
+    )
+    return hmac_obj.hexdigest()
+
 def login(wallet, password):
     try:
         data = {"displayAddress": wallet, "password": password}
@@ -85,7 +98,8 @@ def get_pending():
         pass
     return []
 
-def submit_block(height, nonce, hash_value, prev_hash, reward, wallet, cookie, transactions):
+def submit_block(height, nonce, hash_value, prev_hash, reward, wallet, cookie, transactions,
+                block_hmac, worker_salt, mining_salt, block_salt):
     data = {
         "height": height,
         "transactions": transactions,
@@ -93,7 +107,11 @@ def submit_block(height, nonce, hash_value, prev_hash, reward, wallet, cookie, t
         "timestamp": int(time.time() * 1000),
         "nonce": nonce,
         "hash": hash_value,
-        "minerAddress": wallet
+        "minerAddress": wallet,
+        "blockHMAC": block_hmac,
+        "workerSalt": worker_salt,
+        "miningSalt": mining_salt,
+        "blockSalt": block_salt
     }
     headers = {"Content-Type": "application/json"}
     if cookie:
@@ -104,7 +122,6 @@ def submit_block(height, nonce, hash_value, prev_hash, reward, wallet, cookie, t
     except:
         return False
 
-# ============== HASH CHUẨN ==============
 def json_stringify(obj):
     if obj is None:
         return "null"
@@ -124,20 +141,18 @@ def json_stringify(obj):
         return "[" + ",".join(items) + "]"
     return json.dumps(obj, separators=(',', ':'))
 
-def calculate_block_hash(height, prev_hash, timestamp, transactions, nonce):
+def calculate_block_hash(height, prev_hash, timestamp, transactions, nonce, mining_salt, block_salt):
     tx_string = ''.join([json_stringify(tx) for tx in transactions])
-    data = f"{height}{prev_hash}{timestamp}{tx_string}{nonce}"
-    return hashlib.sha1(data.encode()).hexdigest()
+    data = f"{height}{prev_hash}{timestamp}{tx_string}{nonce}{mining_salt}{block_salt}"
+    return hashlib.sha1(data.encode()).digest().hex()
 
-# ============== MINING THREAD ==============
-def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, cookie):
+def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, cookie, public_key):
     global total_hashes, blocks_mined, total_reward, running
 
     print_color(f"🧵 Thread {thread_id} started", Fore.CYAN)
 
     while running:
         try:
-            # Lấy thông tin block hiện tại
             info = get_network_info()
             if not info or not info.get('latestBlock'):
                 time.sleep(0.1)
@@ -152,48 +167,67 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
             
             height = latest['height'] + 1
             prev_hash = latest['hash']
-            public_key = wallet[2:]
 
-            # Nonce range cho thread này
             start_nonce = thread_id * 20000000
             end_nonce = (thread_id + 1) * 20000000
             nonce = start_nonce
             
-            # Lấy pending transactions cho block này
             pending = get_pending()
-            print_color(f"📦 Block #{height} - {len(pending)} pending transactions", Fore.YELLOW)
+            
+            mining_salt = generate_salt(8)
+            block_salt = generate_salt(8)
+            
+            print_color(f"📦 Block #{height} - {len(pending)} pending", Fore.YELLOW)
+            if thread_id == 0:
+                print_color(f"   Mining Salt: {mining_salt}", Fore.CYAN)
+                print_color(f"   Block Salt: {block_salt}", Fore.CYAN)
             
             start_local = time.time()
             local_hashes = 0
+            timestamp = int(time.time() * 1000)
             
             while running and nonce < end_nonce:
-                # Tạo timestamp mới cho mỗi lần thử (giống web)
                 timestamp = int(time.time() * 1000)
                 
+                coinbase_salt = generate_salt(16)
                 coinbase = {
                     "from": None,
                     "to": public_key,
                     "amount": base_reward,
                     "timestamp": timestamp,
-                    "signature": None
+                    "signature": None,
+                    "salt": coinbase_salt
                 }
+                
+                coinbase_hmac = calculate_hmac(
+                    f"{public_key}{base_reward}{timestamp}{coinbase_salt}",
+                    public_key,
+                    coinbase_salt
+                )
+                coinbase["hmac"] = coinbase_hmac
                 
                 transactions = [coinbase] + pending
                 
-                hash_value = calculate_block_hash(height, prev_hash, timestamp, transactions, nonce)
+                hash_bytes = calculate_block_hash(height, prev_hash, timestamp, transactions, nonce, mining_salt, block_salt)
                 local_hashes += 1
                 
-                if hash_value.startswith(target):
+                if hash_bytes.startswith(target):
                     elapsed = time.time() - start_local
                     speed = local_hashes / elapsed if elapsed > 0 else 0
                     
-                    print_color(f"\n🎯 Thread {thread_id}: Found nonce {nonce} in {elapsed:.1f}s ({speed/1000:.1f} kH/s)", Fore.GREEN)
-                    print_color(f"   Hash: {hash_value}", Fore.CYAN)
-                    print_color(f"   Timestamp: {timestamp}", Fore.CYAN)
-                    print_color(f"   Pending: {len(pending)}", Fore.CYAN)
+                    print_color(f"\n🎯 Thread {thread_id}: Found nonce {nonce}", Fore.GREEN)
+                    print_color(f"   Speed: {speed/1000:.2f} kH/s", Fore.CYAN)
+                    print_color(f"   Hash: {hash_bytes[:30]}...", Fore.CYAN)
+
+                    worker_salt = generate_salt(16)
+                    block_data = f"{height}{hash_bytes}{prev_hash}{nonce}"
+                    block_hmac = calculate_hmac(block_data, public_key, worker_salt)
+                    
+                    print_color(f"   Block HMAC: {block_hmac[:16]}...", Fore.CYAN)
 
                     if thread_id == 0 and cookie:
-                        if submit_block(height, nonce, hash_value, prev_hash, base_reward, wallet, cookie, transactions):
+                        if submit_block(height, nonce, hash_bytes, prev_hash, base_reward, wallet, cookie, transactions,
+                                      block_hmac, worker_salt, mining_salt, block_salt):
                             with stats_lock:
                                 blocks_mined += 1
                                 total_reward += base_reward
@@ -201,7 +235,6 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
                         else:
                             print_color(f"❌❌❌ Block #{height} REJECTED! ❌❌❌", Fore.RED)
                     
-                    # Sau khi tìm thấy nonce, thoát để lấy block mới
                     break
                 
                 nonce += 1
@@ -210,7 +243,6 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
                     with stats_lock:
                         total_hashes += 10000
                     
-                    # Kiểm tra pending có thay đổi không
                     new_pending = get_pending()
                     if len(new_pending) != len(pending):
                         print_color(f"⚠️ Pending changed from {len(pending)} to {len(new_pending)}", Fore.YELLOW)
@@ -220,7 +252,6 @@ def mining_thread(thread_id, wallet, difficulty_override, target_cpu_percent, co
             print_color(f"Thread {thread_id} error: {e}", Fore.RED)
             time.sleep(1)
 
-# ============== STATS THREAD ==============
 def stats_thread():
     global running
     last_hashes = 0
@@ -251,7 +282,6 @@ def stats_thread():
         last_hashes = current_hashes
         last_time = now
 
-# ============== CẤU HÌNH ==============
 def save_config(wallet, password, threads, cpu_percent, difficulty):
     config = configparser.ConfigParser()
     config["WebCoin"] = {
@@ -289,12 +319,11 @@ def load_config():
         "difficulty": diff
     }
 
-# ============== MAIN ==============
 def main():
     global running, start_time, auth_cookie
 
     print_color("\n" + "="*60, Fore.MAGENTA, bright=True)
-    print_color(" WEBCCOIN MINER v10.0 - PENDING CHO MỖI NONCE", Fore.MAGENTA, bright=True)
+    print_color(" WEBCCOIN MINER v10.0 - SHA1 + HMAC + SALT", Fore.MAGENTA, bright=True)
     print_color("="*60, Fore.MAGENTA, bright=True)
 
     config = load_config()
@@ -336,13 +365,15 @@ def main():
     auth_cookie = cookie
     print_color(f"✅ Đăng nhập thành công!", Fore.GREEN)
 
+    public_key = wallet[2:] if wallet.startswith('W_') else wallet
+
     print_color(f"\n🚀 Bắt đầu đào {threads} luồng, {cpu_percent}% CPU", Fore.GREEN)
     print_color("="*60, Fore.MAGENTA)
 
     start_time = time.time()
 
     for i in range(threads):
-        t = threading.Thread(target=mining_thread, args=(i, wallet, difficulty_override, cpu_percent, cookie), daemon=True)
+        t = threading.Thread(target=mining_thread, args=(i, wallet, difficulty_override, cpu_percent, cookie, public_key), daemon=True)
         t.start()
 
     stats = threading.Thread(target=stats_thread, daemon=True)
