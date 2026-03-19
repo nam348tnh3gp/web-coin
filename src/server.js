@@ -68,6 +68,11 @@ function getBlockDataString(height, hash, previousHash, nonce) {
     return `${height}:${hash}:${previousHash}:${nonce}`;
 }
 
+function normalizeSalt(salt) {
+    if (!salt) return '';
+    return salt.trim().replace(/\s+/g, '');
+}
+
 app.get('/api/info', (req, res) => {
     try {
         const latest = BlockchainController.getLatestBlock();
@@ -75,7 +80,7 @@ app.get('/api/info', (req, res) => {
         const difficulty = BlockchainController.adjustDifficulty();
         const reward = BlockchainController.calculateReward(difficulty);
         const networkHashrate = BlockchainController.getNetworkHashrate();
-        
+
         res.json({
             latestBlock: latest ? latest.toJSON() : null,
             difficulty,
@@ -145,14 +150,14 @@ app.get('/api/history/:address', (req, res) => {
     try {
         const address = req.params.address;
         const publicKey = parseDisplayAddress(address);
-        
+
         const blocks = BlockchainController.getAllBlocks();
         const history = [];
-        
+
         for (const block of blocks) {
             for (const tx of block.transactions) {
                 const txJson = tx.toJSON();
-                
+
                 if (txJson.from === publicKey || txJson.to === publicKey) {
                     history.push({
                         hash: tx.hash(),
@@ -169,7 +174,7 @@ app.get('/api/history/:address', (req, res) => {
                 }
             }
         }
-        
+
         history.sort((a, b) => b.timestamp - a.timestamp);
         res.json({ address, history });
     } catch (err) {
@@ -321,10 +326,10 @@ app.post('/api/blocks/submit', authenticateToken, validate(blockSchema), (req, r
 
         const txObjects = transactions.map(t => Transaction.fromJSON(t));
         const block = new Block(height, txObjects, previousHash, timestamp, nonce);
-        
+
         if (miningSalt) block.miningSalt = miningSalt;
         if (blockSalt) block.blockSalt = blockSalt;
-        
+
         if (block.calculateHash() !== hash) {
             console.log('=== DEBUG HASH SERVER ===');
             console.log('Height:', height);
@@ -340,14 +345,25 @@ app.post('/api/blocks/submit', authenticateToken, validate(blockSchema), (req, r
         }
 
         if (blockHMAC && workerSalt) {
+            const normalizedWorkerSalt = normalizeSalt(workerSalt);
             const blockDataString = getBlockDataString(height, hash, previousHash, nonce);
 
             console.log('=== DEBUG HMAC SERVER ===');
             console.log('Block Data String:', blockDataString);
-            console.log('Worker Salt:', workerSalt);
+            console.log('Original Worker Salt:', workerSalt);
+            console.log('Normalized Worker Salt:', normalizedWorkerSalt);
+            console.log('Worker Salt length:', normalizedWorkerSalt.length);
             console.log('Client HMAC:', blockHMAC);
+            console.log('HMAC_SECRET from config:', config.HMAC_SECRET ? 'OK' : 'MISSING');
 
-            if (!hmacManager.verify(blockDataString, blockHMAC, workerSalt)) {
+            const calculatedHMAC = crypto.createHmac('sha256', config.HMAC_SECRET + normalizedWorkerSalt)
+                .update(blockDataString)
+                .digest('hex');
+            
+            console.log('Server calculated HMAC:', calculatedHMAC);
+            console.log('Match:', blockHMAC === calculatedHMAC);
+
+            if (!hmacManager.verify(blockDataString, blockHMAC, normalizedWorkerSalt)) {
                 console.log('❌ HMAC verification failed');
                 return res.status(400).json({ error: 'Invalid block HMAC signature' });
             }
@@ -365,14 +381,14 @@ app.post('/api/blocks/submit', authenticateToken, validate(blockSchema), (req, r
         if (txObjects.length === 0 || txObjects[0].from !== null) {
             return res.status(400).json({ error: 'First transaction must be coinbase' });
         }
-        
+
         const expectedReward = BlockchainController.calculateReward(difficulty);
         if (txObjects[0].amount !== expectedReward) {
             return res.status(400).json({ 
                 error: `Invalid mining reward. Expected ${expectedReward} for difficulty ${difficulty}, got ${txObjects[0].amount}` 
             });
         }
-        
+
         if (txObjects[0].to !== minerPub) {
             return res.status(400).json({ error: 'Coinbase recipient mismatch' });
         }
@@ -406,7 +422,7 @@ app.post('/api/blocks/submit', authenticateToken, validate(blockSchema), (req, r
         });
 
         checkTx();
-        
+
         logger.info(`Block #${height} accepted from miner ${minerAddress}`);
         res.json({ 
             message: 'Block accepted', 
@@ -474,10 +490,10 @@ app.get('/api/stats', (req, res) => {
         const totalBlocks = db.prepare('SELECT COUNT(*) as count FROM blocks').get().count;
         const totalTransactions = db.prepare('SELECT COUNT(*) as count FROM mempool').get().count;
         const totalWallets = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
-        
+
         const difficulty = BlockchainController.adjustDifficulty();
         const networkHashrate = BlockchainController.getNetworkHashrate();
-        
+
         let avgBlockTime = 0;
         if (blocks.length > 1) {
             const firstBlock = blocks[0];
@@ -485,7 +501,7 @@ app.get('/api/stats', (req, res) => {
             const timeSpan = (lastBlock.timestamp - firstBlock.timestamp) / 1000;
             avgBlockTime = timeSpan / (blocks.length - 1);
         }
-        
+
         res.json({
             totalBlocks,
             totalTransactions,
