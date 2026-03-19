@@ -82,17 +82,24 @@ function adjustMiningDifficulty() {
 
 async function getHMACSecret() {
     try {
+        console.log('🔄 Đang lấy HMAC secret từ server...');
         const res = await fetch('/api/hmac-secret', {
             credentials: 'include'
         });
-        if (res.ok) {
-            const data = await res.json();
+        
+        if (!res.ok) {
+            console.error('❌ HTTP error:', res.status);
+            return false;
+        }
+        
+        const data = await res.json();
+        if (data.secret) {
             hmacSecret = data.secret;
-            console.log('✅ Đã lấy HMAC secret từ server');
+            console.log('✅ Đã lấy HMAC secret từ server:', hmacSecret.substring(0, 10) + '...');
             return true;
         }
     } catch (err) {
-        console.error('Lỗi lấy HMAC secret:', err);
+        console.error('❌ Lỗi kết nối khi lấy HMAC secret:', err);
     }
     return false;
 }
@@ -634,18 +641,13 @@ async function startMining() {
             logDiv.innerHTML += `⏱️ Thời gian: ${totalTime}s\n`;
 
             const workerSalt = generateSalt(16);
-            const blockData = {
-                height: newBlock.height,
-                hash: hash,
-                previousHash: newBlock.previousHash,
-                nonce: newBlock.nonce
-            };
+            const blockDataString = `${newBlock.height}:${hash}:${newBlock.previousHash}:${newBlock.nonce}`;
             
             console.log('=== DEBUG HMAC CLIENT ===');
-            console.log('Block Data:', blockData);
+            console.log('Block Data String:', blockDataString);
             console.log('Worker Salt:', workerSalt);
             
-            const blockHMAC = await generateHMAC(blockData, hmacSecret, workerSalt);
+            const blockHMAC = await generateHMAC(blockDataString, hmacSecret, workerSalt);
             
             console.log('Block HMAC:', blockHMAC);
             console.log('========================');
@@ -811,13 +813,8 @@ async function startSimpleMining() {
         logDiv.innerHTML += `⏱️ Thời gian: ${totalTime}s\n`;
 
         const workerSalt = generateSalt(16);
-        const blockData = {
-            height: newBlock.height,
-            hash: hash,
-            previousHash: newBlock.previousHash,
-            nonce: newBlock.nonce
-        };
-        const blockHMAC = await generateHMAC(blockData, hmacSecret, workerSalt);
+        const blockDataString = `${newBlock.height}:${hash}:${newBlock.previousHash}:${newBlock.nonce}`;
+        const blockHMAC = await generateHMAC(blockDataString, hmacSecret, workerSalt);
 
         const submitData = {
             height: newBlock.height,
