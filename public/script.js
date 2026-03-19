@@ -34,6 +34,10 @@ async function generateHMAC(data, secretKey, salt) {
     return Array.from(new Uint8Array(signature), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
+function getBlockDataString(height, hash, previousHash, nonce) {
+    return `${height}:${hash}:${previousHash}:${nonce}`;
+}
+
 function showTab(tabId) {
     document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
@@ -641,14 +645,14 @@ async function startMining() {
             logDiv.innerHTML += `⏱️ Thời gian: ${totalTime}s\n`;
 
             const workerSalt = generateSalt(16);
-            const blockDataString = `${newBlock.height}:${hash}:${newBlock.previousHash}:${newBlock.nonce}`;
-            
+            const blockDataString = getBlockDataString(newBlock.height, hash, newBlock.previousHash, newBlock.nonce);
+
             console.log('=== DEBUG HMAC CLIENT ===');
             console.log('Block Data String:', blockDataString);
             console.log('Worker Salt:', workerSalt);
-            
+
             const blockHMAC = await generateHMAC(blockDataString, hmacSecret, workerSalt);
-            
+
             console.log('Block HMAC:', blockHMAC);
             console.log('========================');
 
@@ -813,7 +817,7 @@ async function startSimpleMining() {
         logDiv.innerHTML += `⏱️ Thời gian: ${totalTime}s\n`;
 
         const workerSalt = generateSalt(16);
-        const blockDataString = `${newBlock.height}:${hash}:${newBlock.previousHash}:${newBlock.nonce}`;
+        const blockDataString = getBlockDataString(newBlock.height, hash, newBlock.previousHash, newBlock.nonce);
         const blockHMAC = await generateHMAC(blockDataString, hmacSecret, workerSalt);
 
         const submitData = {
