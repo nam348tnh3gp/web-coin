@@ -16,7 +16,6 @@ const logger = require('./utils/logger');
 
 const app = express();
 
-// Security middleware
 app.use(helmet({
     contentSecurityPolicy: {
         directives: {
@@ -27,7 +26,6 @@ app.use(helmet({
     }
 }));
 
-// CORS configuration
 const corsOptions = {
     origin: function (origin, callback) {
         if (!origin) return callback(null, true);
@@ -55,7 +53,6 @@ if (config.TRUST_PROXY) {
 
 app.use(express.static('public'));
 
-// Helper functions
 function formatDisplayAddress(publicKey) {
     return 'W_' + publicKey;
 }
@@ -66,8 +63,6 @@ function parseDisplayAddress(displayAddr) {
     }
     return displayAddr;
 }
-
-// ============== PUBLIC APIS ==============
 
 app.get('/api/info', (req, res) => {
     try {
@@ -179,8 +174,6 @@ app.get('/api/history/:address', (req, res) => {
     }
 });
 
-// ============== AUTH APIS ==============
-
 app.post('/api/register', validate(registerSchema), async (req, res) => {
     try {
         const { password } = req.body;
@@ -260,8 +253,6 @@ app.post('/api/logout', (req, res) => {
     res.clearCookie('token');
     res.json({ message: 'Logged out' });
 });
-
-// ============== PROTECTED APIS ==============
 
 app.post('/api/transactions', authenticateToken, validate(transactionSchema), (req, res) => {
     try {
@@ -419,8 +410,6 @@ app.post('/api/blocks/submit', authenticateToken, validate(blockSchema), (req, r
     }
 });
 
-// ============== API KEY MANAGEMENT ==============
-
 app.post('/api/apikey/generate', authenticateToken, (req, res) => {
     try {
         const apiKey = BlockchainController.generateMinerAPIKey(req.user.publicKey);
@@ -442,7 +431,33 @@ app.post('/api/apikey/verify', (req, res) => {
     }
 });
 
-// ============== NETWORK STATS ==============
+app.get('/api/hmac-secret', authenticateToken, (req, res) => {
+    try {
+        logger.info(`User ${req.user.displayAddress} requested HMAC secret`);
+        res.json({ 
+            secret: config.HMAC_SECRET,
+            message: 'HMAC secret retrieved successfully'
+        });
+    } catch (err) {
+        logger.error('Error getting HMAC secret:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/api/hmac-secret-public', (req, res) => {
+    try {
+        if (config.NODE_ENV === 'production') {
+            return res.status(403).json({ error: 'Forbidden in production' });
+        }
+        res.json({ 
+            secret: config.HMAC_SECRET,
+            message: 'HMAC secret retrieved successfully (public)'
+        });
+    } catch (err) {
+        logger.error('Error getting HMAC secret:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 
 app.get('/api/stats', (req, res) => {
     try {
@@ -477,8 +492,6 @@ app.get('/api/stats', (req, res) => {
     }
 });
 
-// ============== GENESIS BLOCK ==============
-
 (function initGenesis() {
     const latest = BlockchainController.getLatestBlock();
     if (!latest) {
@@ -493,18 +506,12 @@ app.get('/api/stats', (req, res) => {
     }
 })();
 
-// ============== HEALTH CHECK ==============
-
 app.get('/health', (req, res) => res.send('OK'));
-
-// ============== ERROR HANDLING ==============
 
 app.use((err, req, res, next) => {
     logger.error(err.stack);
     res.status(500).json({ error: 'Something went wrong!' });
 });
-
-// ============== START SERVER ==============
 
 const PORT = config.PORT;
 app.listen(PORT, () => {
