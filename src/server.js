@@ -336,15 +336,20 @@ app.post('/api/blocks/submit', authenticateToken, validate(blockSchema), (req, r
         }
 
         if (blockHMAC && workerSalt) {
-            const blockData = {
-                height,
-                hash,
-                previousHash,
-                nonce
-            };
-            if (!hmacManager.verify(blockData, blockHMAC, workerSalt)) {
+            const blockDataString = `${height}:${hash}:${previousHash}:${nonce}`;
+            
+            console.log('=== DEBUG HMAC SERVER ===');
+            console.log('Block Data String:', blockDataString);
+            console.log('Worker Salt:', workerSalt);
+            console.log('Client HMAC:', blockHMAC);
+            
+            if (!hmacManager.verify(blockDataString, blockHMAC, workerSalt)) {
+                console.log('❌ HMAC verification failed');
                 return res.status(400).json({ error: 'Invalid block HMAC signature' });
             }
+            
+            console.log('✅ HMAC verification passed');
+            console.log('========================');
             block.blockHMAC = blockHMAC;
         }
 
