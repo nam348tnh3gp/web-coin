@@ -29,6 +29,7 @@ volatile unsigned long totalHashes = 0;
 volatile int blocksMined = 0;
 volatile int totalReward = 0;
 unsigned long startTime;
+bool mining = true;
 
 String calculateHash(int height, String prevHash, unsigned long ts, String txStr, unsigned long nonce) {
     char data[512];
@@ -61,8 +62,11 @@ bool login() {
     
     http.addHeader("Content-Type", "application/json");
 
-    String payload = "{\"displayAddress\":\"" + String(config.wallet) +
-                     "\",\"password\":\"" + String(config.password) + "\"}";
+    DynamicJsonDocument doc(256);
+    doc["displayAddress"] = config.wallet;
+    doc["password"] = config.password;
+    String payload;
+    serializeJson(doc, payload);
 
     Serial.println("\n----- DEBUG LOGIN -----");
     Serial.println("Gui len server: " + payload);
@@ -74,13 +78,12 @@ bool login() {
         String response = http.getString();
         Serial.println("Server tra ve: " + response);
 
-        DynamicJsonDocument doc(2048);
-        deserializeJson(doc, response);
+        DynamicJsonDocument resDoc(2048);
+        deserializeJson(resDoc, response);
 
-        if (doc["error"].isNull()) {
-
-            if (!doc["publicKey"].isNull()) {
-                String pk = doc["publicKey"].as<String>();
+        if (resDoc["error"].isNull()) {
+            if (!resDoc["publicKey"].isNull()) {
+                String pk = resDoc["publicKey"].as<String>();
                 strncpy(config.publicKey, pk.c_str(), sizeof(config.publicKey) - 1);
                 config.publicKey[sizeof(config.publicKey) - 1] = '\0';
                 Serial.println("PublicKey nhan duoc: " + pk);
@@ -97,7 +100,7 @@ bool login() {
             Serial.println("----- DANG NHAP THANH CONG -----\n");
             return true;
         } else {
-            Serial.println("Loi tu server: " + doc["error"].as<String>());
+            Serial.println("Loi tu server: " + resDoc["error"].as<String>());
         }
     } else {
         String response = http.getString();
@@ -210,6 +213,31 @@ void resetWalletInfo() {
     ESP.restart();
 }
 
+String cleanInput(String input) {
+    input.trim();
+    input.replace("\r", "");
+    input.replace("\n", "");
+    if (input.startsWith("\\")) {
+        input = input.substring(1);
+    }
+    return input;
+}
+
+void processSerialCommand(String cmd) {
+    cmd.trim();
+    if (cmd == "STOP") {
+        mining = false;
+        Serial.println("STOPPED");
+    } else if (cmd == "START") {
+        mining = true;
+        Serial.println("STARTED");
+    } else if (cmd == "STATUS") {
+        unsigned long uptime = millis() / 1000;
+        Serial.printf("Uptime: %lu s, Hashes: %lu, Blocks: %d, Reward: %d\n",
+                      uptime, totalHashes, blocksMined, totalReward);
+    }
+}
+
 void setup() {
     Serial.begin(115200);
     delay(1000);
@@ -218,33 +246,23 @@ void setup() {
     digitalWrite(LED_PIN, HIGH);
 
     Serial.println("\n\n=================================");
-    Serial.println("   WebCoin Miner cho ESP8266");
+    Serial.println("   WebCoin Miner cho ESP8266 (FIXED)");
     Serial.println("=================================");
 
     loadConfig();
 
     Serial.println("Thong tin hien tai:");
-    
     Serial.print("Dia chi vi: ");
-    if (strlen(config.wallet) > 0) {
-        Serial.println(config.wallet);
-    } else {
-        Serial.println("Chua co");
-    }
+    if (strlen(config.wallet) > 0) Serial.println(config.wallet);
+    else Serial.println("Chua co");
     
     Serial.print("Mat khau: ");
-    if (strlen(config.password) > 0) {
-        Serial.println("Da luu");
-    } else {
-        Serial.println("Chua co");
-    }
+    if (strlen(config.password) > 0) Serial.println("Da luu");
+    else Serial.println("Chua co");
     
     Serial.print("PublicKey: ");
-    if (strlen(config.publicKey) > 0) {
-        Serial.println(config.publicKey);
-    } else {
-        Serial.println("Chua co");
-    }
+    if (strlen(config.publicKey) > 0) Serial.println(config.publicKey);
+    else Serial.println("Chua co");
 
     if (strlen(config.wallet) == 0 || strlen(config.password) == 0) {
         Serial.println("\n----- NHAP THONG TIN VI -----");
@@ -252,15 +270,22 @@ void setup() {
         Serial.print("Nhap dia chi vi (bat dau bang W_...): ");
         while (!Serial.available());
         String w = Serial.readStringUntil('\n');
-        w.trim();
+        w = cleanInput(w);
+        if (!w.startsWith("W_")) {
+            Serial.println("Ví không hợp lệ! Phải bắt đầu bằng W_. Hãy reset lại.");
+            delay(3000);
+            ESP.restart();
+        }
         strncpy(config.wallet, w.c_str(), sizeof(config.wallet) - 1);
+        config.wallet[sizeof(config.wallet) - 1] = '\0';
         Serial.println("Da nhan: " + w);
         
         Serial.print("Nhap mat khau: ");
         while (!Serial.available());
         String p = Serial.readStringUntil('\n');
-        p.trim();
+        p = cleanInput(p);
         strncpy(config.password, p.c_str(), sizeof(config.password) - 1);
+        config.password[sizeof(config.password) - 1] = '\0';
         Serial.println("Da nhan: " + p);
 
         saveConfig();
@@ -326,14 +351,30 @@ void setup() {
 
     Serial.println("[LOGIN] Thanh cong!");
     startTime = millis();
+    mining = true;
     Serial.println("\n[Miner] San sang! Dang dao...\n");
 }
 
 void loop() {
-    static unsigned long lastStats = 0;
     static unsigned long lastLedBlink = 0;
     static bool ledState = false;
     static unsigned long lastLoginCheck = 0;
+    static String serialBuffer = "";
+
+    while (Serial.available()) {
+        char c = Serial.read();
+        if (c == '\n') {
+            processSerialCommand(serialBuffer);
+            serialBuffer = "";
+        } else if (c != '\r') {
+            serialBuffer += c;
+        }
+    }
+
+    if (!mining) {
+        delay(100);
+        return;
+    }
 
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("[WiFi] Mat ket noi, dang ket noi lai...");
@@ -359,7 +400,6 @@ void loop() {
     }
 
     JsonObject latest = info["latestBlock"];
-
     int diff = config.difficulty > 0 ? config.difficulty : info["difficulty"].as<int>();
     int reward = info["reward"].as<int>();
 
@@ -368,8 +408,8 @@ void loop() {
 
     int height = latest["height"].as<int>() + 1;
     String prevHash = latest["hash"].as<String>();
-
     unsigned long ts = time(nullptr) * 1000;
+
     String txStr = "[{\"from\":null,\"to\":\"" + String(config.publicKey) +
                    "\",\"amount\":" + String(reward) +
                    ",\"timestamp\":" + String(ts) +
@@ -391,7 +431,7 @@ void loop() {
     unsigned long nonce = 0;
     unsigned long localHashCount = 0;
 
-    while (true) {
+    while (mining) {
         if (millis() - lastLedBlink > 500) {
             ledState = !ledState;
             digitalWrite(LED_PIN, ledState ? LOW : HIGH);
@@ -420,13 +460,17 @@ void loop() {
 
         if (nonce % 10000 == 0) {
             float speed = totalHashes / ((millis() - startTime) / 1000.0);
-            Serial.printf("\rSpeed: %.2f H/s | Total: %d | Blocks: %d | Reward: %d", 
+            Serial.printf("\rSpeed: %.2f H/s | Total: %lu | Blocks: %d | Reward: %d", 
                          speed, totalHashes, blocksMined, totalReward);
             yield();
         }
 
         if (nonce % 5000 == 0) {
             delay(0);
+        }
+
+        if (Serial.available()) {
+            break;
         }
     }
 
